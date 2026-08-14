@@ -1,0 +1,19 @@
+{
+  "name": "pi-annotate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.10",
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@earendil-works/pi-tui": "0.80.10",
+    "@types/node": "26.2.0",
+    "typebox": "1.1.38",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}
