@@ -4,7 +4,8 @@ slug: pi-annotate
 title: "pi-annotate — annotate rendered markdown and feed annotations back to the pi agent"
 status: active
 tasks:
-  - pi-annotate-core
+  # pi-annotate-core: delivered 2026-08-14, archived to docs/tasks/archive/pi-annotate-core/
+  # - pi-annotate-core
 ---
 
 ## Destination
