@@ -111,10 +111,11 @@ N total: R ranges, B blocks, K notes.
 ### complete.ts
 ```ts
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-export function listMarkdownFiles(cwd: string, opts?: { maxDepth?: number }): string[]; // relative paths, cached
+export function listMarkdownFiles(cwd: string, opts?: { maxDepth?: number }): Promise<string[]>; // relative paths, cached
 export function filterCompletions(files: string[], prefix: string, limit?: number): AutocompleteItem[];
+export function getArgumentCompletions(cwd: string, prefix: string): Promise<AutocompleteItem[] | null>;
 ```
-`listMarkdownFiles` ignores `.git`, `node_modules`, `.pi`, and hidden dirs; bounded depth (default 6); caps total files (e.g. 2000) for safety. `filterCompletions` returns `value`/`label` = relative path, case-insensitive prefix/substring, capped at `limit` (default 50); returns `[]` (not `null`) when nothing matches — the caller decides `null`-vs-`[]` (return `null` per the pi API when empty so the built-in provider can take over, *or* `[]`; we choose `null` when empty to match the `commands.ts` example).
+`listMarkdownFiles` ignores `.git`, `node_modules`, `.pi`, and hidden dirs; bounded depth (default 6); caps total files (e.g. 2000) for safety; caches per `cwd:maxDepth` key so repeated autocomplete keystrokes don't re-walk. `filterCompletions` returns `value`/`label` = relative path, case-insensitive prefix/substring, capped at `limit` (default 50); returns `[]` (not `null`) when nothing matches. `getArgumentCompletions` combines the two and returns `null` when empty so the built-in provider can take over.
 
 ## Existing abstractions to use (and NOT reimplement)
 
@@ -136,7 +137,7 @@ export function filterCompletions(files: string[], prefix: string, limit?: numbe
 ## Interface contracts between slices (what each slice exports for the next)
 
 - **Slice 1 → 2:** `startAnnotateServer(filePath, opts)` returns `AnnotateServer` with `{ port, url, server, done }`; serves `GET /` and `GET /api/doc`; `liveServers` set + `session_shutdown` wiring. Slice 2 **adds** `POST /api/annotations` and the `opts.onSubmit` callback without changing the return shape.
-- **Slice 2 → 3,4:** `startAnnotateServer(filePath, { cwd, onSubmit, openBrowser })` invokes `onSubmit(payload)` exactly once on a valid submit, then the server closes. Slice 3 (blocking tool) passes `onSubmit = resolve`; slice 4 (async command) passes `onSubmit = (p) => deliver(p, ctx)`. Both reuse slice 1's `openBrowser` + `liveServers` unchanged.
+- **Slice 2 → 3,4:** `startAnnotateServer(filePath, { cwd, onSubmit, openBrowser })` invokes `onSubmit(payload)` exactly once on a valid submit, then the server closes. Slice 3 (blocking tool) passes `onSubmit = resolve`; slice 4 (async command) passes `onSubmit = (p) => deliver(p, ctx, pi, s.done)`. Both reuse slice 1's `openBrowser` + `liveServers` unchanged.
 - **All slices:** `Payload`/`Annotation` types live in `annotations.ts` and are imported by `server.ts`, `index.ts`, and tests. Slice 2 introduces them; slices 3/4 import them.
 
 ## Decisions pinned (from map/task doc)
