@@ -166,6 +166,32 @@ added inside the client script to drive the annotation state machine from a
 dependency-free `new Function(...)` mock-DOM test harness (no jsdom); it is a
 no-op in a real browser and not part of the public extension API.
 
+### Slice 3 — blocking-tool (landed)
+
+The agent-callable `annotate` blocking tool is delivered. It is registered via
+`pi.registerTool` with label "Annotate", a Typebox `Type.Object({ path:
+Type.String(...) })` parameter (typed with `Static<...>`), a `promptSnippet`,
+`promptGuidelines`, and an `execute` function. `execute` strips a leading `@`
+from the path, resolves it against `ctx.cwd` (absolute accepted), validates it
+is a regular file (throws → `isError` otherwise), then starts the annotation
+server with `openBrowser: true` and blocks on a promise that resolves on submit
+(`onSubmit`) or rejects on `signal.aborted`. A `settled` flag guarantees the
+first terminal event wins, guarding against late submit-after-abort races and
+abort-during-server-start. On submit: builds a human-readable summary via
+`buildSummary`, truncates it with `truncateHead` to `DEFAULT_MAX_BYTES`/
+`DEFAULT_MAX_LINES` (appending a truncation note when truncated), and returns
+`{ content, details: { payload }, terminate: true }`. On abort: closes the
+server and returns `{ content: [{ text: "Annotation cancelled." }] }`. The
+server is closed on both submit and abort. `test/tool.test.ts` covers all
+acceptance scenarios (submit with mixed annotations, non-existent path,
+directory path, abort, large-payload truncation, leading `@`, relative
+subdirectory, zero annotations, double submit). `test/index.test.ts`'s fake
+`ExtensionAPI` was extended with a `registerTool` mock to match the new
+registration. Divergence: the abort branch returns `details: undefined as
+unknown as AnnotateToolDetails` to satisfy the `AgentToolResult<TDetails>`
+TypeScript contract while preserving the runtime shape described in the slice
+prose. Full suite: 65 tests across 6 files; `tsc --noEmit` clean.
+
 ## Test plan (task-level)
 
 See each slice's `## Test plan`. Cross-cutting: the full suite must pass
