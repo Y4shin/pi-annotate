@@ -4,7 +4,7 @@ type: feature
 slug: pi-annotate-core
 title: "pi-annotate core: annotate tool, /annotate command, and ephemeral web annotation UI"
 map: pi-annotate
-status: ready
+status: done
 slices:
   - 1-md-file-server
   - 2-annotation-ui
