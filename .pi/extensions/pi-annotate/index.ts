@@ -15,6 +15,7 @@ import path from "node:path";
 import { stat } from "node:fs/promises";
 import { startAnnotateServer, liveServers } from "./server.ts";
 import { buildSummary, type Payload } from "./annotations.ts";
+import { getArgumentCompletions } from "./complete.ts";
 
 const annotateParameters = Type.Object({
   path: Type.String({
@@ -24,6 +25,49 @@ const annotateParameters = Type.Object({
 
 type AnnotateToolParams = Static<typeof annotateParameters>;
 type AnnotateToolDetails = { payload: Payload };
+
+// Current session cwd, used by command argument completions. Updated on session_start.
+let sessionCwd: string | undefined;
+
+const pendingDones = new WeakSet<() => Promise<void>>();
+
+export async function deliver(
+  payload: Payload,
+  ctx: ExtensionCommandContext,
+  pi: ExtensionAPI,
+  done: () => Promise<void>,
+): Promise<void> {
+  if (pendingDones.has(done)) return;
+  pendingDones.add(done);
+  const summary = buildSummary(payload);
+  const truncated = truncateHead(summary, {
+    maxBytes: DEFAULT_MAX_BYTES,
+    maxLines: DEFAULT_MAX_LINES,
+  });
+
+  let message = truncated.content;
+  if (truncated.truncated) {
+    message += `\n\n[Output truncated: showed ${truncated.outputLines} of ${truncated.totalLines} lines (${formatSize(
+      truncated.outputBytes,
+    )} of ${formatSize(truncated.totalBytes)}) — use details.payload for the complete structured data.]`;
+  }
+
+  try {
+    if (ctx.isIdle()) {
+      pi.sendUserMessage(message);
+    } else {
+      pi.sendUserMessage(message, { deliverAs: "followUp" });
+    }
+  } catch (err) {
+    console.error("deliver sendUserMessage error:", err);
+  }
+
+  try {
+    await done();
+  } catch {
+    // Swallow: done is idempotent and may race with server close.
+  }
+}
 
 async function executeAnnotate(
   _toolCallId: string,
@@ -144,17 +188,34 @@ export default function (pi: ExtensionAPI): void {
 
   pi.registerCommand("annotate", {
     description: "Open a markdown file in the browser for annotation.",
+    getArgumentCompletions: (prefix: string) =>
+      getArgumentCompletions(sessionCwd ?? process.cwd(), prefix),
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const rawPath = args.trim();
       if (!rawPath) {
-        ctx.ui.notify("Please provide a markdown file path.", "error");
+        ctx.ui.notify("Usage: /annotate <path.md>", "warning");
+        return;
+      }
+
+      const resolvedInput = rawPath.startsWith("@") ? rawPath.slice(1) : rawPath;
+      const resolvedPath = path.resolve(ctx.cwd, resolvedInput);
+
+      try {
+        const fileStat = await stat(resolvedPath);
+        if (!fileStat.isFile()) {
+          throw new Error(`Not a regular file: ${resolvedPath}`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        ctx.ui.notify(`Could not open annotation server: ${message}`, "error");
         return;
       }
 
       try {
-        const s = await startAnnotateServer(rawPath, {
+        const s = await startAnnotateServer(resolvedPath, {
           cwd: ctx.cwd,
           openBrowser: true,
+          onSubmit: (payload) => deliver(payload, ctx, pi, s.done),
         });
         ctx.ui.notify(`Annotation server running at ${s.url}`, "info");
       } catch (err) {
@@ -162,6 +223,10 @@ export default function (pi: ExtensionAPI): void {
         ctx.ui.notify(`Could not start annotation server: ${message}`, "error");
       }
     },
+  });
+
+  pi.on("session_start", (_event, ctx) => {
+    sessionCwd = ctx.cwd;
   });
 
   pi.on("session_shutdown", async () => {

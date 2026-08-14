@@ -134,6 +134,26 @@ edits, live-reload, custom TUI rendering of the tool result.
 (Slice-level interface contracts added to `docs/tasks/pi-annotate-core/arch-spec.md`
 during implementation per the feature pipeline.)
 
+### Slice 4 — async-command (landed)
+
+The `/annotate` command is upgraded from a fire-and-forget stub to a first-class
+async command with `.md` autocomplete and async delivery. The new module
+`complete.ts` provides `listMarkdownFiles(cwd)` (bounded depth, ignore dirs,
+capped and cached), `filterCompletions(files, prefix)` (case-insensitive
+prefix/substring, capped at 50), and `getArgumentCompletions(cwd, prefix)`
+(returning `null` when empty). The command handler validates the resolved path
+(`@` stripping, absolute accepted), surfaces usage/error notifications for
+empty/missing paths, starts the annotation server with `openBrowser: true`,
+notifies the URL, and returns immediately. Submit delivery is handled by the
+exported `deliver(payload, ctx, pi, done)`: it formats the payload via
+`buildSummary`, truncates with `truncateHead` to 50KB/2000 lines, sends via
+`pi.sendUserMessage` (no `deliverAs` when idle, `"followUp"` when busy), and
+closes the server. A `WeakSet` guard makes `deliver` idempotent if called more
+than once. `session_start` captures `ctx.cwd` so the pi-registered
+`getArgumentCompletions(prefix)` seam can discover project markdown files.
+No new runtime npm dependencies; `complete.ts` uses `node:fs/promises` and
+`node:path` only.
+
 ### Slice 1 — md-file-server (landed)
 
 Foundation slice delivered. Loopback `http.Server` on `127.0.0.1:0`, module-level
