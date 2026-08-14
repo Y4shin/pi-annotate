@@ -154,6 +154,8 @@ than once. `session_start` captures `ctx.cwd` so the pi-registered
 No new runtime npm dependencies; `complete.ts` uses `node:fs/promises` and
 `node:path` only.
 
+_Landing: merged slice/async-command (c74ca862) into task/pi-annotate-core via `--no-ff`; slice doc archived to `docs/tasks/pi-annotate-core/slices/archive/4-async-command.md`; slice branch deleted. Full suite green (7 files, 83 tests); `tsc --noEmit` clean._
+
 ### Slice 1 — md-file-server (landed)
 
 Foundation slice delivered. Loopback `http.Server` on `127.0.0.1:0`, module-level
