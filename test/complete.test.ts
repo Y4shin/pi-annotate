@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, mkdir, writeFile, rmdir } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -16,8 +16,7 @@ describe("complete", () => {
   });
 
   afterEach(async () => {
-    // Best-effort cleanup; ignore failures on non-empty dirs in edge-case tests.
-    await rmdir(tempDir).catch(() => {});
+    await rm(tempDir, { recursive: true, force: true });
   });
 
   async function makeTree(entries: Array<[string, string | null]>): Promise<void> {
