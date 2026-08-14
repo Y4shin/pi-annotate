@@ -11,12 +11,17 @@ function fakePi(): {
   commands: Array<{ name: string; description?: string; handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> }>;
   shutdownHandlers: Array<(event: unknown) => Promise<void> | void>;
   notifications: Array<{ message: string; type?: "info" | "warning" | "error" }>;
+  tools: unknown[];
 } {
   const commands: Array<{ name: string; description?: string; handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> }> = [];
   const shutdownHandlers: Array<(event: unknown) => Promise<void> | void> = [];
   const notifications: Array<{ message: string; type?: "info" | "warning" | "error" }> = [];
+  const tools: unknown[] = [];
 
   const pi = {
+    registerTool: (tool: unknown) => {
+      tools.push(tool);
+    },
     registerCommand: (name: string, options: { description?: string; handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> }) => {
       commands.push({ name, description: options.description, handler: options.handler });
     },
@@ -25,7 +30,7 @@ function fakePi(): {
     },
   } as unknown as ExtensionAPI;
 
-  return { pi, commands, shutdownHandlers, notifications };
+  return { pi, commands, shutdownHandlers, notifications, tools };
 }
 
 function fakeCtx(cwd: string, notifications: Array<{ message: string; type?: "info" | "warning" | "error" }>): ExtensionCommandContext {
