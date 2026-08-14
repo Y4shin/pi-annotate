@@ -10,7 +10,7 @@ import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import path from "node:path";
 import { stat } from "node:fs/promises";
 import { startAnnotateServer, liveServers } from "./server.ts";
@@ -22,12 +22,12 @@ const annotateParameters = Type.Object({
   }),
 });
 
-type AnnotateToolParams = typeof annotateParameters;
+type AnnotateToolParams = Static<typeof annotateParameters>;
 type AnnotateToolDetails = { payload: Payload };
 
 async function executeAnnotate(
   _toolCallId: string,
-  params: { path: string },
+  params: AnnotateToolParams,
   signal: AbortSignal | undefined,
   _onUpdate: unknown,
   ctx: ExtensionContext,
