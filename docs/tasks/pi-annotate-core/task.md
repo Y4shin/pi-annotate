@@ -146,6 +146,26 @@ live servers. No files written to disk; only the target `.md` is read.
 Interface contract held with no drift: slice 2 can extend `opts` with
 `onSubmit` and add `POST /api/annotations` without touching the return shape.
 
+### Slice 2 — annotation-ui (landed)
+
+Annotation UI slice delivered. The inlined browser client now supports all
+three annotation kinds — text-range highlights (selection + floating "Add
+comment" button), block/paragraph comments (per-block `💬` margin marker), and
+whole-document notes (textarea + "Add note") — and renders a visible, deletable
+annotation list. The "Send to agent" button posts the combined `Payload` to
+`POST /api/annotations`, which validates the body shape and invokes the new
+optional `opts.onSubmit(payload)` callback before closing the server; the
+client then shows a "Done — you can close this tab" state. `onSubmit` in this
+slice only stores the payload and closes — slices 3 and 4 will wire delivery
+to the blocking tool and the async command respectively. The return shape of
+`startAnnotateServer` is unchanged (backward compatible). New exports in
+`annotations.ts`: `Annotation`, `Payload`, `isValidPayload`, `blockIndexOf`,
+`buildSummary`. No new Node-side npm dependencies. XSS-safe client rendering
+(user input escaped). A small test-only seam `globalThis.__annotateTest` was
+added inside the client script to drive the annotation state machine from a
+dependency-free `new Function(...)` mock-DOM test harness (no jsdom); it is a
+no-op in a real browser and not part of the public extension API.
+
 ## Test plan (task-level)
 
 See each slice's `## Test plan`. Cross-cutting: the full suite must pass
