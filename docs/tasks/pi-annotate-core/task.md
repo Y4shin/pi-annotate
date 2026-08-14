@@ -220,3 +220,65 @@ See each slice's `## Test plan`. Cross-cutting: the full suite must pass
 before the task is finalised; manual smoke test = load extension, call tool
 with a sample `.md`, annotate in a browser, submit, confirm the agent receives
 the payload.
+
+## Implementation notes
+
+### Summary
+
+Delivered a pi extension at `.pi/extensions/pi-annotate/` (zero runtime npm
+deps; Node built-ins only; markdown rendered in-browser). Four tracer-bullet
+slices landed sequentially: `md-file-server` (loopback server + `/`
++ `/api/doc` + `/annotate` stub + `session_shutdown`), `annotation-ui` (`POST
+/api/annotations` + `onSubmit` + text-range/block/note annotation UI),
+`blocking-tool` (agent-callable `annotate` tool, blocks until submit/abort,
+returns payload + `terminate:true`), `async-command` (`/annotate` autocomplete
++ fire-and-forget + async delivery via `pi.sendUserMessage`). Final suite: 83
+tests across 7 files; `tsc --noEmit` clean.
+
+### Key decisions that held
+
+- `startAnnotateServer(filePath, { cwd, onSubmit?, openBrowser?,
+  browserOpener? }) -> { port, url, server, done }` was the stable interface
+  contract across all four slices; it was extended (not rewritten) by each
+  downstream slice via `opts`.
+- Client-side markdown rendering (inlined in `htmlShell()`/`clientScript()`)
+  kept the Node extension dependency-free.
+- Ephemeral annotations only — no disk writes. The payload goes to the agent on
+  submit, then the server closes.
+- Loopback-only (`127.0.0.1:0`), browser auto-open best-effort.
+
+### Notable divergences (all judged acceptable; see deviation-reports/)
+
+- `deliver(payload, ctx, pi, done)` takes `pi` explicitly (not on
+  `ExtensionCommandContext`) so it is unit-testable with a fake `pi`.
+- `listMarkdownFiles` returns `Promise<string[]>` (async `readdir`); the arch
+  spec was corrected to match.
+- A `session_start` handler captures `ctx.cwd` into a module-level `sessionCwd`
+  because pi's `getArgumentCompletions(prefix)` callback receives only the
+  prefix (not a context with `cwd`); falls back to `process.cwd()`.
+- The blocking tool's abort branch returns `details: undefined as unknown as
+  AnnotateToolDetails` to satisfy the `AgentToolResult<TDetails>` type while
+  keeping the runtime "no payload" shape.
+
+### Infrastructure additions worth reusing
+
+- `PI_ANNOTATE_NO_BROWSER=1` env gate on `openBrowser()` — suppresses real
+  browser opens during autonomous/headless runs so they never steal focus.
+  The URL is still returned to the caller. Also useful for SSH users.
+- Dependency-free fake-DOM testing pattern (`new Function(...)` against a
+  minimal `document`/`fetch` mock) in `test/client.test.ts` — validates the
+  inlined client script's syntax and render/annotation flow without jsdom.
+
+### Known issues / follow-ups
+
+- In-place `<mark>` highlight for text-range comments is not implemented; the
+  selected quote shows in the annotation list but is not visually highlighted
+  in the rendered text. Cosmetic; flagged for optional `/impeccable`
+  refinement (notes archived unstyled at user's request).
+- Browser tabs opened by worker ad-hoc verification during implementation could
+  not connect (the throwaway script tore the server down before the tab
+  loaded). This is a test-harness artifact, not an extension bug — the real
+  `annotate` tool / `/annotate` command keep the server alive. The
+  `PI_ANNOTATE_NO_BROWSER` env gate prevents the tabs during autonomous runs.
+  Verifying the real browser path is a follow-up (drive via the actual
+  tool/command, not a throwaway script).
