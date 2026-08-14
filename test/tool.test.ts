@@ -328,6 +328,34 @@ describe("annotate tool", () => {
     expect(result.details.payload.annotations).toEqual([]);
   });
 
+  it("execute resolves a relative path in a subdirectory", async () => {
+    const { pi, tools } = fakePi();
+    ext(pi);
+    const tool = tools.find((t) => t.name === "annotate")!;
+
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-annotate-tool-subdir-"));
+    const sub = path.join(dir, "docs");
+    await mkdir(sub);
+    const file = path.join(sub, "nested.md");
+    await writeFile(file, "# Nested", "utf-8");
+
+    const executePromise = tool.execute("call-10", { path: "docs/nested.md" }, undefined, undefined, fakeCtx(dir));
+
+    const server = await waitForLiveServer();
+    const url = serverUrl(server);
+
+    const payload: Payload = { file: "docs/nested.md", submittedAt: Date.now(), annotations: [] };
+    const res = await fetch(`${url}api/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    expect(res.status).toBe(200);
+
+    const result = (await executePromise) as AgentToolResult<{ payload: Payload }>;
+    expect(result.details.payload.file).toBe("docs/nested.md");
+  });
+
   it("execute ignores a late submit after abort", async () => {
     const { pi, tools } = fakePi();
     ext(pi);
