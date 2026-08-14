@@ -5,8 +5,10 @@ import path from "node:path";
 import {
   startAnnotateServer,
   liveServers,
+  openBrowser,
   type AnnotateServer,
 } from "../.pi/extensions/pi-annotate/server.ts";
+import type { Payload } from "../.pi/extensions/pi-annotate/annotations.ts";
 
 async function tmpFile(content: string, name = "doc.md"): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-annotate-"));
@@ -16,6 +18,21 @@ async function tmpFile(content: string, name = "doc.md"): Promise<string> {
 }
 
 describe("startAnnotateServer", () => {
+  it("openBrowser is a no-op when PI_ANNOTATE_NO_BROWSER=1", async () => {
+    // The env gate lets autonomous/test runs suppress real browser opens so
+    // they never steal focus. openBrowser must not spawn a process and must
+    // not throw when suppressed.
+    const prev = process.env.PI_ANNOTATE_NO_BROWSER;
+    process.env.PI_ANNOTATE_NO_BROWSER = "1";
+    try {
+      // Should not throw and should not spawn a browser.
+      expect(() => openBrowser("http://127.0.0.1:1/ignore")).not.toThrow();
+    } finally {
+      if (prev === undefined) delete process.env.PI_ANNOTATE_NO_BROWSER;
+      else process.env.PI_ANNOTATE_NO_BROWSER = prev;
+    }
+  });
+
   it("rejects when the target file does not exist", async () => {
     await expect(
       startAnnotateServer("/does/not/exist.md", { cwd: "/tmp" }),
@@ -161,5 +178,142 @@ describe("startAnnotateServer", () => {
     expect(s.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
 
     await s.done();
+  });
+
+  it("POST /api/annotations accepts a valid payload, calls onSubmit, and closes the server", async () => {
+    const file = await tmpFile("x");
+    const submitted: Payload[] = [];
+    const s = await startAnnotateServer(file, {
+      cwd: path.dirname(file),
+      openBrowser: false,
+      onSubmit: (p) => submitted.push(p),
+    });
+    liveServers.add(s.server);
+
+    const payload: Payload = {
+      file: "doc.md",
+      submittedAt: Date.now(),
+      annotations: [{ kind: "note", comment: "hello", created: 1 }],
+    };
+
+    const res = await fetch(`${s.url}api/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(submitted.length).toBe(1);
+    expect(submitted[0]).toEqual(payload);
+
+    // Give the server a moment to close.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(fetch(s.url)).rejects.toThrow();
+    expect(liveServers.has(s.server)).toBe(false);
+  });
+
+  it("POST /api/annotations accepts an empty annotations array and closes the server", async () => {
+    const file = await tmpFile("x");
+    const submitted: Payload[] = [];
+    const s = await startAnnotateServer(file, {
+      cwd: path.dirname(file),
+      openBrowser: false,
+      onSubmit: (p) => submitted.push(p),
+    });
+    liveServers.add(s.server);
+
+    const payload: Payload = { file: "doc.md", submittedAt: 1, annotations: [] };
+    const res = await fetch(`${s.url}api/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(submitted).toEqual([payload]);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(fetch(s.url)).rejects.toThrow();
+  });
+
+  it("POST /api/annotations rejects a malformed body and keeps the server up", async () => {
+    const file = await tmpFile("x");
+    const submitted: Payload[] = [];
+    const s = await startAnnotateServer(file, {
+      cwd: path.dirname(file),
+      openBrowser: false,
+      onSubmit: (p) => submitted.push(p),
+    });
+    liveServers.add(s.server);
+
+    const res = await fetch(`${s.url}api/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ not: "valid" }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBeTruthy();
+    expect(submitted.length).toBe(0);
+
+    // Server should still be reachable.
+    const getRes = await fetch(`${s.url}api/doc`);
+    expect(getRes.status).toBe(200);
+
+    await s.done();
+  });
+
+  it("POST /api/annotations without onSubmit still closes the server on valid payload", async () => {
+    const file = await tmpFile("x");
+    const s = await startAnnotateServer(file, {
+      cwd: path.dirname(file),
+      openBrowser: false,
+    });
+    liveServers.add(s.server);
+
+    const payload: Payload = { file: "doc.md", submittedAt: 1, annotations: [] };
+    const res = await fetch(`${s.url}api/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    expect(res.status).toBe(200);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(fetch(s.url)).rejects.toThrow();
+  });
+
+  it("POST /api/annotations double-submit is a no-op after server closes", async () => {
+    const file = await tmpFile("x");
+    const submitted: Payload[] = [];
+    const s = await startAnnotateServer(file, {
+      cwd: path.dirname(file),
+      openBrowser: false,
+      onSubmit: (p) => submitted.push(p),
+    });
+    liveServers.add(s.server);
+
+    const payload: Payload = { file: "doc.md", submittedAt: 1, annotations: [] };
+    const res1 = await fetch(`${s.url}api/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    expect(res1.status).toBe(200);
+
+    // Second request races with server close; it may succeed or fail to connect.
+    try {
+      const res2 = await fetch(`${s.url}api/annotations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      // If it somehow reaches the handler, onSubmit must not fire again.
+      expect([200, 503, 502, 521, 404]).toContain(res2.status);
+    } catch {
+      // Connection refused is acceptable: server already closed.
+    }
+
+    expect(submitted.length).toBe(1);
   });
 });
