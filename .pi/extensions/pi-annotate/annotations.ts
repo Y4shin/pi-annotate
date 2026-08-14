@@ -9,18 +9,6 @@ export type Payload = {
   annotations: Annotation[];
 };
 
-function hasShape(
-  value: unknown,
-  required: Record<string, "string" | "number">,
-): boolean {
-  if (typeof value !== "object" || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  for (const [key, type] of Object.entries(required)) {
-    if (typeof obj[key] !== type) return false;
-  }
-  return true;
-}
-
 export function isValidPayload(x: unknown): x is Payload {
   if (typeof x !== "object" || x === null) return false;
   const p = x as Record<string, unknown>;
