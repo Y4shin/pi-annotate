@@ -32,6 +32,12 @@ function readRequestBody(req: import("node:http").IncomingMessage): Promise<stri
 }
 
 export function openBrowser(url: string): void {
+  // Allow suppressing browser opens (e.g. during automated testing or
+  // headless/SSH runs). The URL is still returned to the caller regardless.
+  if (process.env.PI_ANNOTATE_NO_BROWSER === "1") {
+    console.error(`openBrowser suppressed (PI_ANNOTATE_NO_BROWSER=1): ${url}`);
+    return;
+  }
   const command =
     platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
   exec(`${command} ${url}`, (err) => {

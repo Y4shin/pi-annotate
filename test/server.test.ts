@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   startAnnotateServer,
   liveServers,
+  openBrowser,
   type AnnotateServer,
 } from "../.pi/extensions/pi-annotate/server.ts";
 import type { Payload } from "../.pi/extensions/pi-annotate/annotations.ts";
@@ -17,6 +18,21 @@ async function tmpFile(content: string, name = "doc.md"): Promise<string> {
 }
 
 describe("startAnnotateServer", () => {
+  it("openBrowser is a no-op when PI_ANNOTATE_NO_BROWSER=1", async () => {
+    // The env gate lets autonomous/test runs suppress real browser opens so
+    // they never steal focus. openBrowser must not spawn a process and must
+    // not throw when suppressed.
+    const prev = process.env.PI_ANNOTATE_NO_BROWSER;
+    process.env.PI_ANNOTATE_NO_BROWSER = "1";
+    try {
+      // Should not throw and should not spawn a browser.
+      expect(() => openBrowser("http://127.0.0.1:1/ignore")).not.toThrow();
+    } finally {
+      if (prev === undefined) delete process.env.PI_ANNOTATE_NO_BROWSER;
+      else process.env.PI_ANNOTATE_NO_BROWSER = prev;
+    }
+  });
+
   it("rejects when the target file does not exist", async () => {
     await expect(
       startAnnotateServer("/does/not/exist.md", { cwd: "/tmp" }),
