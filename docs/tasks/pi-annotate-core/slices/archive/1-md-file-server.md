@@ -1,10 +1,10 @@
 ---
 kind: slice
 slug: md-file-server
-title: "Loopback server renders a markdown file in the browser (extension skeleton)"
+title: Loopback server renders a markdown file in the browser (extension skeleton)
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: []
 ---
