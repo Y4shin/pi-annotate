@@ -110,3 +110,17 @@ Browser auto-opens to the server URL; the server stops when the user clicks
   re-resolution across edits is a future concern).
 - Auto-syncing the rendered view to live disk changes.
 - A custom pi TUI renderer for the tool result (plain text summary is fine).
+
+## Known issues (out of current effort)
+
+- During implementation, worker ad-hoc verification spawned browser tabs that
+  could not connect (they loaded `ERR_CONNECTION_REFUSED`). Root cause (suspected,
+  not yet verified): the worker ran a one-off node script that called
+  `startAnnotateServer`, then `openBrowser`, then the script exited — tearing down
+  the `http.Server` before the browser tab could load. The extension itself keeps
+  the server alive for the tool/command lifetime, so this is a *test-harness*
+  artifact, not an extension bug. The `PI_ANNOTATE_NO_BROWSER=1` env gate (added in
+  slice 2) prevents the tabs from opening at all during autonomous runs. To fully
+  verify the real browser path later: drive the extension through the actual
+  `annotate` tool or `/annotate` command (which keep the server alive) instead of
+  a throwaway script, or add a `--keep-alive` test shim. Punt to a follow-up.
