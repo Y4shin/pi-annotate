@@ -8,7 +8,8 @@
     "check": "tsc --noEmit",
     "build:css": "tailwindcss -i .pi/extensions/pi-annotate/styles.css -o .pi/extensions/pi-annotate/dist/annotate.css --minify",
     "build:preview": "node .pi/extensions/pi-annotate/preview.mjs",
-    "build": "npm run build:css && npm run build:preview"
+    "build": "npm run build:css && npm run build:preview",
+    "test:e2e": "playwright test --config playwright.config.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.80.10",
@@ -20,6 +21,7 @@
     "tailwindcss": "^4.3.3",
     "typebox": "1.1.38",
     "typescript": "7.0.2",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "@playwright/test": "1.61.1"
   }
 }

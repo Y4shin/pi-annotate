@@ -1,6 +1,6 @@
 export type Annotation =
-  | { kind: "range"; quote: string; comment: string; created: number }
-  | { kind: "block"; blockIndex: number; comment: string; created: number }
+  | { kind: "range"; quote: string; comment: string; created: number; priority?: boolean }
+  | { kind: "block"; blockIndex: number; comment: string; created: number; priority?: boolean }
   | { kind: "note"; comment: string; created: number };
 
 export type Payload = {
@@ -33,6 +33,9 @@ export function isValidPayload(x: unknown): x is Payload {
     } else {
       return false;
     }
+    // priority is optional on range/block annotations; if present it must be
+    // a boolean (the composer's warning send button sets it).
+    if (a.kind !== "note" && a.priority !== undefined && typeof a.priority !== "boolean") return false;
   }
 
   return true;
@@ -56,12 +59,13 @@ export function buildSummary(payload: Payload): string {
   let notes = 0;
 
   for (const a of payload.annotations) {
+    const flag = a.kind !== "note" && a.priority === true ? " [priority]" : "";
     if (a.kind === "range") {
       ranges++;
-      lines.push(`- range: "${truncate(a.quote, 200)}" → ${truncate(a.comment, 200)}`);
+      lines.push(`- range: "${truncate(a.quote, 200)}" → ${truncate(a.comment, 200)}${flag}`);
     } else if (a.kind === "block") {
       blocks++;
-      lines.push(`- block #${a.blockIndex}: ${truncate(a.comment, 200)}`);
+      lines.push(`- block #${a.blockIndex}: ${truncate(a.comment, 200)}${flag}`);
     } else if (a.kind === "note") {
       notes++;
       lines.push(`- note: ${truncate(a.comment, 200)}`);

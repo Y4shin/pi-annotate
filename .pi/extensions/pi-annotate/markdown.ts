@@ -45,6 +45,27 @@ export function renderMarkdown(md: string): string {
   const lines = md.split("\n");
   let i = 0;
 
+  // YAML frontmatter: a leading `---` fence closed by a second `---` (or
+  // `...`). Rendered as a fenced YAML code block so it reads as metadata,
+  // not body content. Annotations work the same as any other block: the
+  // rendered <pre> is an annotatable-block child of the doc column.
+  if (lines.length > 0 && lines[0].trim() === "---") {
+    let end = -1;
+    for (let k = 1; k < lines.length; k++) {
+      if (lines[k].trim() === "---" || lines[k].trim() === "...") {
+        end = k;
+        break;
+      }
+    }
+    if (end !== -1) {
+      const fmLines = lines.slice(1, end);
+      blocks.push(
+        `<pre><code class="language-yaml">${escapeCode(fmLines.join("\n"))}</code></pre>`,
+      );
+      i = end + 1;
+    }
+  }
+
   while (i < lines.length) {
     const line = lines[i];
 

@@ -435,7 +435,7 @@ describe("client script", () => {
 });
 
 describe("annotation UI", () => {
-  it("builds the annotation panel with list, note input, and submit button", async () => {
+  it("builds the annotation panel with list, composer, and send actions", async () => {
     const { doc, app } = makeDocument();
     const { fetch } = makeFetch({ path: "notes.md", markdown: "# Hello\n\nparagraph" });
     const script = clientScript();
@@ -446,8 +446,13 @@ describe("annotation UI", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(app.querySelector(".annotation-panel")).not.toBeNull();
-    expect(app.querySelector('[data-action="submit"]')).not.toBeNull();
+    // The composer send button (normal feedback) and the priority send button
+    // replace the old "Add note" + "Send to agent" stamp.
     expect(app.querySelector('[data-action="add-note"]')).not.toBeNull();
+    expect(app.querySelector('[data-action="priority-note"]')).not.toBeNull();
+    // The mode toggle is present and starts in global (language) mode.
+    expect(app.querySelector('[data-action="toggle-mode"]')).not.toBeNull();
+    expect(app.querySelector('.note-box')).not.toBeNull();
     expect(app.querySelector(".annotation-list")).not.toBeNull();
   });
 
@@ -498,7 +503,7 @@ describe("annotation UI", () => {
     expect(list.innerHTML).not.toContain("remove");
   });
 
-  it("clicking the submit button POSTs the payload and shows the done state", async () => {
+  it("submitting POSTs the payload and shows the done state", async () => {
     const { doc, app } = makeDocument();
     const { fetch, calls } = makeFetch({ path: "notes.md", markdown: "# Hello" });
     const script = clientScript();
@@ -510,8 +515,9 @@ describe("annotation UI", () => {
     const api = getTestApi();
     api.addNote("ship it");
 
-    const submitBtn = app.querySelector('[data-action="submit"]')!;
-    submitBtn.click();
+    // The "Send to agent" stamp is gone for now; exercise submit through the
+    // test seam, which drives the same POST + done-state path.
+    api.submit();
 
     // Wait for the async fetch.
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -540,9 +546,8 @@ describe("annotation UI", () => {
     const api = getTestApi();
     api.addNote("once");
 
-    const submitBtn = app.querySelector('[data-action="submit"]')!;
-    submitBtn.click();
-    submitBtn.click();
+    api.submit();
+    api.submit();
 
     await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -602,8 +607,7 @@ describe("annotation UI", () => {
     api.addBlock(0, "block comment", 2000);
     api.addNote("note comment", 3000);
 
-    const submitBtn = app.querySelector('[data-action="submit"]')!;
-    submitBtn.click();
+    api.submit();
 
     await new Promise((resolve) => setTimeout(resolve, 50));
 

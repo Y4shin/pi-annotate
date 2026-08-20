@@ -31,6 +31,11 @@ const { htmlShell } = await import(path.join(here, "client.ts"));
 const SAMPLE_DOC = {
   path: "preview-sample.md",
   markdown: [
+    "---",
+    "title: preview-sample",
+    "type: md",
+    "---",
+    "",
     "# pi-annotate — Preview Sample",
     "",
     "A short rendered sample to exercise the **Redline Proof** UI for live",
