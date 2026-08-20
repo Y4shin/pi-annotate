@@ -44,6 +44,11 @@ and `client.ts` (which inlines the built bundle via `readFileSync` at module
 load). After editing `styles.css`, always run `npm run build:css` so the bundle
 the app inlines matches.
 
+> **Live-mode note:** `npm run build:preview` regenerates the preview from
+> source, which **wipes the Impeccable live toolbar injection**. After
+> rebuilding, re-inject by re-running `node .agents/skills/impeccable/scripts/live.mjs`
+> (idempotent) before opening the page.
+
 ## Run the extension
 
 The extension is auto-discovered from `.pi/extensions/pi-annotate/index.ts`
