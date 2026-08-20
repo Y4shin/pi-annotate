@@ -2,3 +2,10 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# Impeccable design tooling (per-environment, not project source).
+# The .agents/ skill is installed by the upstream Impeccable package;
+# .impeccable/ holds generated design artifacts, decision payloads,
+# live-mode session state, and review screenshots.
+.agents/
+.impeccable/

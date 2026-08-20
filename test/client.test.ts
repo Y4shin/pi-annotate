@@ -5,7 +5,9 @@ interface FakeNode {
   nodeType?: "element" | "text";
   tagName?: string;
   textContent: string;
+  nodeValue?: string;
   parentNode: FakeElement | null;
+  splitText?(idx: number): FakeNode;
 }
 
 interface FakeElement extends FakeNode {
@@ -25,6 +27,7 @@ interface FakeElement extends FakeNode {
   _attrs: Record<string, string>;
   appendChild(child: FakeElement | FakeNode): FakeElement;
   removeChild(child: FakeElement | FakeNode): FakeElement;
+  insertBefore(child: FakeElement | FakeNode, ref: FakeElement | FakeNode): FakeElement;
   addEventListener(type: string, fn: (...args: unknown[]) => void): void;
   removeEventListener(type: string, fn: (...args: unknown[]) => void): void;
   dispatchEvent(event: { type: string; [k: string]: unknown }): void;
@@ -89,6 +92,17 @@ function fakeElement(tagName: string): FakeElement {
       syncInnerHTML(el);
       return child as FakeElement;
     },
+    insertBefore(child: FakeElement | FakeNode, ref: FakeElement | FakeNode) {
+      const refIdx = el.children.indexOf(ref as FakeElement);
+      if (refIdx === -1) {
+        el.children.push(child as FakeElement);
+      } else {
+        el.children.splice(refIdx, 0, child as FakeElement);
+      }
+      (child as FakeElement).parentNode = el;
+      syncInnerHTML(el);
+      return child as FakeElement;
+    },
     addEventListener(type: string, fn: (...args: unknown[]) => void) {
       el._listeners[type] = el._listeners[type] || [];
       el._listeners[type].push(fn);
@@ -125,11 +139,52 @@ function fakeElement(tagName: string): FakeElement {
 }
 
 function fakeTextNode(text: string): FakeNode {
-  return {
+  const node: FakeNode = {
     nodeType: "text",
     textContent: text,
+    nodeValue: text,
     parentNode: null,
   };
+  // Minimal splitText: returns a new text node holding the tail, and trims
+  // this node to the head. Mirrors the DOM API enough for wrapRangeHighlight.
+  node.splitText = (idx: number): FakeNode => {
+    const head = text.slice(0, idx);
+    const tail = text.slice(idx);
+    node.nodeValue = head;
+    node.textContent = head;
+    const after: FakeNode = {
+      nodeType: "text",
+      textContent: tail,
+      nodeValue: tail,
+      parentNode: node.parentNode,
+    };
+    // Insert the tail text node into the parent's children right after this
+    // node, mirroring the DOM's splitText (the tail becomes a sibling).
+    if (node.parentNode) {
+      const parent = node.parentNode;
+      const idxInParent = parent.children.indexOf(node as FakeElement);
+      if (idxInParent === -1) {
+        parent.children.push(after as FakeElement);
+      } else {
+        parent.children.splice(idxInParent + 1, 0, after as FakeElement);
+      }
+    }
+    after.splitText = (i: number): FakeNode => {
+      const h = tail.slice(0, i);
+      const t = tail.slice(i);
+      after.nodeValue = h;
+      after.textContent = h;
+      const next: FakeNode = {
+        nodeType: "text",
+        textContent: t,
+        nodeValue: t,
+        parentNode: after.parentNode,
+      };
+      return next;
+    };
+    return after;
+  };
+  return node;
 }
 
 function walkDescendants(root: FakeElement): FakeElement[] {
@@ -247,6 +302,7 @@ function makeDocument() {
     createTextNode(text: string): FakeNode;
     querySelector(sel: string): FakeElement | null;
     querySelectorAll(sel: string): FakeElement[];
+    createTreeWalker(root: FakeElement, whatToShow: number, filter: unknown): { nextNode(): FakeNode | null };
     addEventListener(): void;
     removeEventListener(): void;
     title: string;
@@ -267,6 +323,30 @@ function makeDocument() {
     },
     querySelectorAll(sel: string): FakeElement[] {
       return app.querySelectorAll(sel);
+    },
+    createTreeWalker(root: FakeElement, _whatToShow: number, _filter: unknown) {
+      // Collect text nodes in document order under \`root\`.
+      const textNodes: FakeNode[] = [];
+      function collect(el: FakeElement | FakeNode) {
+        if (el.nodeType === "text" && (el as FakeNode).nodeValue != null) {
+          textNodes.push(el as FakeNode);
+          return;
+        }
+        const parent = el as FakeElement;
+        // The fake DOM stores text content in textContent/innerHTML, not as
+        // child text nodes. For the redline test we seed a real text node as a
+        // child when needed; walk the element's children and any seeded text.
+        for (const child of parent.children) {
+          collect(child);
+        }
+      }
+      collect(root);
+      let i = 0;
+      return {
+        nextNode(): FakeNode | null {
+          return i < textNodes.length ? textNodes[i++] : null;
+        },
+      };
     },
     addEventListener() {},
     removeEventListener() {},
@@ -312,6 +392,7 @@ interface TestApi {
   addNote: (comment: string, created?: number) => void;
   addBlock: (blockIndex: number, comment: string, created?: number) => void;
   addRange: (quote: string, comment: string, created?: number) => void;
+  wrapRangeHighlight: (quote: string) => void;
   deleteAnnotation: (created: number) => void;
   submit: () => void;
   buildPayload: () => { file: string; submittedAt: number; annotations: unknown[] };
@@ -538,5 +619,42 @@ describe("annotation UI", () => {
     expect(body.annotations).toContainEqual(
       expect.objectContaining({ kind: "note", comment: "note comment", created: 3000 }),
     );
+  });
+
+  it("wraps the selected quote in an on-text redline span (the signature element)", async () => {
+    const { doc, app } = makeDocument();
+    const { fetch } = makeFetch({ path: "notes.md", markdown: "# Hello" });
+    const script = clientScript();
+    const run = new Function("document", "fetch", "NodeFilter", `"use strict";\n${script}`);
+    run(doc, fetch, { SHOW_TEXT: 4 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const api = getTestApi();
+    // The fake DOM does not parse innerHTML into child elements, so build a
+    // paragraph with a real text node child directly, the structure
+    // wrapRangeHighlight walks with createTreeWalker.
+    const content = app.querySelector(".content")!;
+    const para = doc.createElement("p");
+    const textNode = doc.createTextNode("The Redline Proof marks the rendered text.");
+    para.appendChild(textNode);
+    content.appendChild(para);
+
+    api.wrapRangeHighlight("Redline Proof");
+
+    // A .pi-annotate-redline span wrapping the quote should now be in the doc.
+    const redline = content.querySelector(".pi-annotate-redline");
+    expect(redline).not.toBeNull();
+    // The span holds the quote as its child text node (the fake DOM keeps
+    // textContent stale, so read the child text node's nodeValue).
+    expect(redline!.children.length).toBe(1);
+    expect((redline!.children[0] as unknown as { nodeValue: string }).nodeValue).toBe("Redline Proof");
+    // The original text node is split: head text, the span, tail text.
+    // All three are children of the paragraph (the fake DOM's appendChild
+    // pushes text nodes into children too).
+    expect(para.children.length).toBe(3);
+    expect(para.children[1]).toBe(redline);
+    // The head text node precedes the span; the tail follows.
+    expect((para.children[0] as unknown as { nodeValue: string }).nodeValue).toBe("The ");
+    expect((para.children[2] as unknown as { nodeValue: string }).nodeValue).toBe(" marks the rendered text.");
   });
 });

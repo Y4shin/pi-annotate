@@ -5,13 +5,19 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "build:css": "tailwindcss -i .pi/extensions/pi-annotate/styles.css -o .pi/extensions/pi-annotate/dist/annotate.css --minify",
+    "build:preview": "node .pi/extensions/pi-annotate/preview.mjs",
+    "build": "npm run build:css && npm run build:preview"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.80.10",
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@earendil-works/pi-tui": "0.80.10",
+    "@tailwindcss/cli": "^4.3.3",
     "@types/node": "26.2.0",
+    "daisyui": "^5.7.19",
+    "tailwindcss": "^4.3.3",
     "typebox": "1.1.38",
     "typescript": "7.0.2",
     "vitest": "4.1.10"

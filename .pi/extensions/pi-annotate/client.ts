@@ -1,3 +1,20 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+// The compiled Tailwind + daisyUI bundle is inlined as a string constant so
+// the runtime extension ships zero npm dependencies and needs no build step
+// at serve time. The bundle is regenerated from styles.css by the build
+// script (npm run build:css); it is committed to the repo.
+const CSS_BUNDLE = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "dist", "annotate.css"),
+  "utf-8",
+);
+
+export function cssBundle(): string {
+  return CSS_BUNDLE;
+}
+
 export function clientScript(): string {
   // Each regex below is written with doubled backslashes so that the emitted
   // JavaScript string contains the intended single-backslash escape sequences.
@@ -111,6 +128,8 @@ export function clientScript(): string {
   var listEl = null;
   var panelEl = null;
   var doneEl = null;
+  var endLabelEl = null;
+  var countEl = null;
 
   function formatAnnotation(a) {
     if (a.kind === "range") {
@@ -122,8 +141,15 @@ export function clientScript(): string {
     return "note";
   }
 
+  function updateCount() {
+    if (countEl) {
+      countEl.textContent = String(annotations.length) + " annotation" + (annotations.length === 1 ? "" : "s");
+    }
+  }
+
   function renderAnnotations() {
     if (!listEl) return;
+    updateCount();
     if (annotations.length === 0) {
       listEl.innerHTML = '<li class="empty">No annotations yet.</li>';
       return;
@@ -140,9 +166,10 @@ export function clientScript(): string {
       comment.textContent = a.comment;
       var del = document.createElement("button");
       del.className = "delete-btn";
-      del.textContent = "×";
       del.setAttribute("data-action", "delete");
       del.setAttribute("data-created", String(a.created));
+      del.setAttribute("aria-label", "Delete annotation");
+      del.innerHTML = svgDelete();
       del.addEventListener("click", function () {
         deleteAnnotation(a.created);
       });
@@ -223,6 +250,18 @@ export function clientScript(): string {
     return { form: form, textarea: ta };
   }
 
+  // Authored hairline SVG icons, one consistent 1.5 stroke. The block mark
+  // is a crosshair glyph (a registration mark, not a filled chip); the delete
+  // glyph is a quiet hairline ×. Floor: Unicode/emoji never stands in for an
+  // icon system.
+  function svgBlockMark() {
+    return '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M7 1.5v11M1.5 7h11"/></svg>';
+  }
+
+  function svgDelete() {
+    return '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg>';
+  }
+
   function setupBlockMarkers() {
     if (!contentEl) return;
     var blocks = contentEl.children;
@@ -234,7 +273,8 @@ export function clientScript(): string {
         marker.className = "block-marker";
         marker.setAttribute("data-action", "block-comment");
         marker.setAttribute("data-index", String(index));
-        marker.textContent = "💬";
+        marker.setAttribute("aria-label", "Annotate this block");
+        marker.innerHTML = svgBlockMark();
         marker.addEventListener("click", function () {
           var form = createCommentForm(function (comment) {
             addAnnotation({ kind: "block", blockIndex: index, comment: comment, created: Date.now() });
@@ -244,6 +284,33 @@ export function clientScript(): string {
         });
         block.appendChild(marker);
       })(i);
+    }
+  }
+
+  // The on-text redline: wrap the selected quote in a highlight span so the
+  // mark lives on the rendered text, like a hand-placed redline on a proof.
+  // We search the text content of each child node of contentEl and wrap the
+  // first occurrence. This is best-effort anchoring by quote text (the same
+  // anchor strategy the payload uses); it does not re-resolve across edits.
+  function wrapRangeHighlight(quote) {
+    if (!contentEl || !quote) return;
+    var needle = quote;
+    var walker = document.createTreeWalker
+      ? document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT, null)
+      : null;
+    if (!walker) return;
+    var node;
+    while ((node = walker.nextNode())) {
+      var idx = node.nodeValue.indexOf(needle);
+      if (idx !== -1) {
+        var span = document.createElement("span");
+        span.className = "pi-annotate-redline";
+        var after = node.splitText(idx);
+        after.nodeValue = after.nodeValue.slice(needle.length);
+        span.appendChild(document.createTextNode(needle));
+        node.parentNode.insertBefore(span, after);
+        return;
+      }
     }
   }
 
@@ -275,6 +342,7 @@ export function clientScript(): string {
       btn.addEventListener("click", function () {
         var form = createCommentForm(function (comment) {
           addAnnotation({ kind: "range", quote: quote, comment: comment, created: Date.now() });
+          wrapRangeHighlight(quote);
         });
         contentEl.appendChild(form.form);
         form.textarea.focus();
@@ -345,23 +413,65 @@ export function clientScript(): string {
   async function load() {
     var app = document.getElementById("app");
     if (!app) return;
+    app.className = "pi-annotate-app";
+    app.innerHTML = "";
     try {
       var res = await fetch("/api/doc");
       if (!res.ok) throw new Error("failed to load doc");
       var data = await res.json();
       currentFile = data.path || "";
       document.title = "Annotate: " + currentFile;
-      app.innerHTML = "";
+
+      // End-label header strip: monospaced file path + live annotation count,
+      // like a printed box end-label. The page's only banner.
+      endLabelEl = document.createElement("div");
+      endLabelEl.className = "pi-annotate-endlabel";
+      var pathSpan = document.createElement("span");
+      pathSpan.textContent = currentFile;
+      var countWrap = document.createElement("span");
+      countWrap.style.cssFloat = "right";
+      countEl = document.createElement("span");
+      countEl.className = "pi-annotate-count";
+      countEl.textContent = "0 annotations";
+      countWrap.appendChild(countEl);
+      endLabelEl.appendChild(pathSpan);
+      endLabelEl.appendChild(countWrap);
+      app.appendChild(endLabelEl);
+
+      // Two-column layout: rendered doc (with left gutter of block marks) and
+      // a right margin rail holding the annotation panel.
+      var layout = document.createElement("div");
+      layout.className = "pi-annotate-layout";
+
+      var docCol = document.createElement("div");
+      docCol.className = "doc-col";
       var h1 = document.createElement("h1");
       h1.textContent = currentFile;
-      app.appendChild(h1);
+      docCol.appendChild(h1);
       contentEl = document.createElement("div");
-      contentEl.className = "content";
+      contentEl.className = "content pi-annotate-doc";
       contentEl.innerHTML = renderMarkdown(data.markdown);
-      app.appendChild(contentEl);
+      docCol.appendChild(contentEl);
+
+      var marginCol = document.createElement("div");
+      marginCol.className = "pi-annotate-margin";
+      // The annotation panel lives in the margin rail.
+      // (setupAnnotationUI appends panelEl + doneEl to \`app\` directly; we
+      // reparent them into the margin column after setup.)
+
+      layout.appendChild(docCol);
+      layout.appendChild(marginCol);
+      app.appendChild(layout);
+
       setupBlockMarkers();
       setupRangeSelection();
-      setupAnnotationUI(app);
+      // Build the annotation panel into the margin column directly.
+      var savedApp = app;
+      setupAnnotationUI(marginCol);
+      // setupAnnotationUI references module-level panelEl/doneEl; they are now
+      // children of marginCol, which is correct.
+
+      void savedApp;
     } catch (err) {
       app.textContent = "Error loading document: " + String(err);
     }
@@ -381,6 +491,11 @@ export function clientScript(): string {
       addRange: function (quote, comment, created) {
         addAnnotation({ kind: "range", quote: quote, comment: comment, created: created || Date.now() });
       },
+      // Test seam for the on-text redline highlight (the signature element).
+      // Wraps the first occurrence of \`quote\` in the rendered doc with a
+      // .pi-annotate-redline span. Exposed so a test can drive the highlight
+      // without the full selection API.
+      wrapRangeHighlight: function (quote) { wrapRangeHighlight(quote); },
       deleteAnnotation: deleteAnnotation,
       submit: submitAnnotations,
       buildPayload: buildPayload,
@@ -399,30 +514,7 @@ export function htmlShell(): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Annotate</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
-    pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; }
-    code { background: #f4f4f4; padding: 0.15rem 0.3rem; }
-    blockquote { border-left: 3px solid #ccc; margin: 0; padding-left: 1rem; color: #555; }
-    .content { position: relative; }
-    .annotatable-block { position: relative; padding-right: 2rem; }
-    .block-marker { position: absolute; right: 0; top: 0; background: none; border: none; cursor: pointer; font-size: 1rem; opacity: 0.4; }
-    .annotatable-block:hover .block-marker { opacity: 1; }
-    .range-marker { position: absolute; top: 0; right: 0; background: #fff; border: 1px solid #ccc; cursor: pointer; }
-    .comment-form { margin: 0.5rem 0; }
-    .comment-form textarea { width: 100%; display: block; }
-    .annotation-panel { margin-top: 2rem; border-top: 2px solid #eee; padding-top: 1rem; }
-    .annotation-list { list-style: none; padding: 0; }
-    .annotation-list .empty { color: #888; }
-    .annotation-item { display: flex; gap: 0.5rem; align-items: center; padding: 0.4rem; border: 1px solid #ddd; margin-bottom: 0.4rem; border-radius: 4px; }
-    .annotation-meta { font-weight: bold; white-space: nowrap; }
-    .annotation-comment { flex: 1; }
-    .delete-btn { background: #fee; border: 1px solid #fcc; color: #c00; cursor: pointer; }
-    .note-box { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-    .note-box textarea { flex: 1; }
-    .submit-btn { font-size: 1rem; padding: 0.5rem 1rem; }
-    .done-state { margin-top: 2rem; padding: 1rem; background: #e8f5e9; border-radius: 4px; }
-  </style>
+  <style>${cssBundle()}</style>
 </head>
 <body>
   <div id="app">Loading…</div>

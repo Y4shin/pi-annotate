@@ -1,0 +1,334 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  /* The Redline Proof: a calm, near-white reading surface with print-shop
+     redline marks. Nord is the active theme — cool, editorial, calm.
+     Ink is never pure black; the ground drifts near-white. One earned
+     accent (the proof stamp) signs the submit. */
+  themes: light --default, nord --prefersdark;
+}
+
+/* ----------------------------------------------------------------------------
+   pi-annotate — The Redline Proof (code-led build, no comp)
+   Direction contract (survives the production build):
+   THESIS: Annotations are direct hand-placed marks on the rendered text,
+          like correcting a physical proof. The doc leads; the marks recede.
+   OWN-WORLD: near-white drifting ground, ink never pure black, hairline rules,
+          one earned redline accent, mono end-labels. Flat-by-default.
+   STORY: The dev opens a rendered markdown file mid-session, marks what the
+          agent should change, stamps "Send to agent," done.
+   FIRST VIEWPORT: rendered doc with a quiet left gutter of block crosshairs
+          and a right margin rail of notes; redline strokes sit on selected
+          text; a proof stamp seals submit.
+   FORM: The Redline Proof — position 1 of 7 on the grounded list
+         (IMPECCABLE'S PICK); concept-roll seed key cd1893c7 (direction scope,
+         operate mode). The Editor Gutter was the roll's assigned index 3;
+         the user picked the pick card.
+   FINISH: unreviewed and undocumented is unfinished; this build ends with the
+           finish review, the verdict, DESIGN.md, and every shipping raster
+           carrying its provenance.
+   ------------------------------------------------------------------------- */
+
+@theme {
+  --color-ink: oklch(22% 0.01 250);
+  --color-paper: oklch(98% 0.003 90);
+  --color-paper-warm: oklch(97% 0.006 70);
+  --color-paper-cool: oklch(97% 0.004 220);
+  --color-hairline: oklch(90% 0.005 250);
+  --color-redline: oklch(52% 0.18 28);
+  --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  --radius-proof: 2px;
+}
+
+/* The reading surface: a near-white sheet that drifts warm at one corner and
+   cool at another, so the ink reads as printed, not rendered. */
+#app.pi-annotate-app {
+  background:
+    radial-gradient(120% 80% at 0% 0%, var(--color-paper-warm) 0%, transparent 50%),
+    radial-gradient(120% 80% at 100% 100%, var(--color-paper-cool) 0%, transparent 50%),
+    var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  line-height: 1.7;
+  min-height: 100vh;
+}
+
+/* Ink is never pure black — rendered markdown inherits the softened ink. */
+#app.pi-annotate-app :where(h1, h2, h3, h4, h5, h6, p, li, blockquote) {
+  color: var(--color-ink);
+}
+
+/* The end-label header: monospaced, like a printed box end-label.
+   file path + live annotation count, the page's only banner. */
+.pi-annotate-endlabel {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--color-ink) 60%, transparent);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+/* Two-column layout: doc (with left gutter) | margin rail. Stacks on mobile. */
+.pi-annotate-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: 2rem;
+}
+@media (max-width: 860px) {
+  .pi-annotate-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The rendered markdown document column — the lead surface. */
+.pi-annotate-doc {
+  background: transparent;
+  max-width: 70ch;
+}
+.pi-annotate-doc h1 { font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+.pi-annotate-doc h2 { font-weight: 600; letter-spacing: -0.01em; }
+.pi-annotate-doc pre {
+  background: color-mix(in oklch, var(--color-paper) 92%, var(--color-ink) 8%);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-proof);
+  overflow-x: auto;
+}
+.pi-annotate-doc code {
+  font-family: var(--font-mono);
+  background: color-mix(in oklch, var(--color-paper) 88%, var(--color-ink) 12%);
+  border-radius: var(--radius-proof);
+}
+.pi-annotate-doc pre code { background: transparent; }
+.pi-annotate-doc blockquote {
+  border-left: 2px solid var(--color-hairline);
+  color: color-mix(in oklch, var(--color-ink) 75%, transparent);
+  font-style: italic;
+}
+.pi-annotate-doc a {
+  color: var(--color-redline);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--color-redline) 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+/* Each annotatable block reserves a left gutter for its crosshair mark. */
+.annotatable-block { position: relative; padding-left: 1.75rem; }
+
+/* The block mark in the left gutter — a hairline crosshair glyph, not a chip.
+   Absence is drawn: the glyph is quiet until hovered/active. */
+.block-marker {
+  position: absolute;
+  left: 0;
+  top: 0.15em;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: color-mix(in oklch, var(--color-ink) 30%, transparent);
+  transition: color 0.15s ease;
+  padding: 0;
+}
+.block-marker:hover,
+.block-marker.is-active { color: var(--color-redline); }
+
+/* The range button — focus brackets tightening around a selection. */
+.range-marker {
+  position: absolute;
+  top: -1.4em;
+  left: 1.75rem;
+  background: var(--color-paper);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-proof);
+  color: var(--color-redline);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  padding: 0.1rem 0.4rem;
+  box-shadow: 0 1px 0 var(--color-hairline);
+}
+.range-marker::before { content: "["; }
+.range-marker::after { content: "]"; }
+
+/* The on-text redline: the one earned saturated accent, hand-placed. */
+.pi-annotate-redline {
+  background: linear-gradient(
+    to bottom,
+    transparent 0 30%,
+    color-mix(in oklch, var(--color-redline) 22%, transparent) 30% 88%,
+    transparent 88% 100%
+  );
+  border-bottom: 2px solid var(--color-redline);
+  padding-bottom: 1px;
+}
+
+/* The right margin rail — where notes live. */
+.pi-annotate-margin { border-left: 1px solid var(--color-hairline); padding-left: 1.5rem; }
+
+/* The annotation panel inside the margin rail. */
+.annotation-panel { margin-top: 0; }
+.annotation-panel h2 {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--color-ink) 55%, transparent);
+  margin-bottom: 0.75rem;
+}
+
+/* The annotation list — flat, no row striping, separated by hairlines. */
+.annotation-list { list-style: none; padding: 0; margin: 0; }
+.annotation-list .empty {
+  color: color-mix(in oklch, var(--color-ink) 40%, transparent);
+  font-style: italic;
+  padding: 0.5rem 0;
+}
+
+/* A note row: flat, hairline ring, no shadow, no bevel. Flat-by-default. */
+.annotation-item {
+  display: flex;
+  gap: 0.4rem;
+  align-items: flex-start;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-proof);
+  margin-bottom: 0.5rem;
+  background: var(--color-paper);
+}
+.annotation-meta {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--color-ink) 50%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-top: 0.15rem;
+}
+.annotation-comment { flex: 1; color: var(--color-ink); }
+
+/* The delete glyph — quiet, ink-dim, never a red button. */
+.delete-btn {
+  background: transparent;
+  border: none;
+  color: color-mix(in oklch, var(--color-ink) 35%, transparent);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+.delete-btn:hover { color: var(--color-redline); }
+
+/* The whole-document note input — quiet, inline, no dialog overlay. */
+.note-box { display: flex; gap: 0.5rem; margin: 0.75rem 0 1rem; }
+.note-box textarea {
+  flex: 1;
+  background: color-mix(in oklch, var(--color-paper) 92%, var(--color-ink) 4%);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-proof);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  padding: 0.4rem 0.5rem;
+  resize: vertical;
+}
+.note-box textarea:focus {
+  outline: none;
+  border-color: color-mix(in oklch, var(--color-redline) 60%, transparent);
+}
+
+/* The inline comment form — appears in place, no modal friction. */
+.comment-form {
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  background: color-mix(in oklch, var(--color-paper) 96%, var(--color-ink) 4%);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-proof);
+}
+.comment-form textarea {
+  width: 100%;
+  display: block;
+  background: var(--color-paper);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-proof);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.4rem;
+  resize: vertical;
+}
+.comment-form textarea:focus { outline: none; border-color: color-mix(in oklch, var(--color-redline) 60%, transparent); }
+.comment-form button { font-size: 0.8rem; padding: 0.3rem 0.7rem; cursor: pointer; border-radius: var(--radius-proof); }
+.comment-form button[data-action="save-comment"] {
+  background: var(--color-redline);
+  color: oklch(98% 0.01 70);
+  border: 1px solid color-mix(in oklch, var(--color-redline) 75%, black 10%);
+  font-weight: 600;
+}
+.comment-form button.secondary,
+.comment-form button[data-action="cancel-comment"] {
+  background: transparent;
+  color: color-mix(in oklch, var(--color-ink) 70%, transparent);
+  border: 1px solid var(--color-hairline);
+  margin-left: 0.3rem;
+}
+
+/* Buttons inside the note-box: the "Add note" ghost action. */
+.note-box button[data-action="add-note"] {
+  background: transparent;
+  color: color-mix(in oklch, var(--color-ink) 70%, transparent);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-proof);
+  font-size: 0.8rem;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.note-box button[data-action="add-note"]:hover { border-color: color-mix(in oklch, var(--color-ink) 40%, transparent); }
+
+/* The proof stamp — the single saturated, human-signed accent on the page.
+   Its rarity is the point. */
+.pi-annotate-stamp,
+button[data-action="submit"] {
+  background: var(--color-redline);
+  color: oklch(98% 0.01 70);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: var(--radius-proof);
+  border: 2px solid color-mix(in oklch, var(--color-redline) 75%, black 10%);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-redline) 30%, transparent) inset;
+  padding: 0.5rem 1.25rem;
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.15s ease;
+  width: 100%;
+}
+button[data-action="submit"]:hover {
+  background: color-mix(in oklch, var(--color-redline) 92%, black 8%);
+  transform: translateY(-1px);
+}
+button[data-action="submit"]:active { transform: translateY(0); }
+button[data-action="submit"]:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* The done state — a quiet confirmation, no celebration. */
+.done-state {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  background: color-mix(in oklch, var(--color-paper) 90%, var(--color-redline) 6%);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-proof);
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+/* The end-label count chip — mono, neutral, shows live annotation count. */
+.pi-annotate-count {
+  color: var(--color-redline);
+  font-variant-numeric: tabular-nums;
+}
