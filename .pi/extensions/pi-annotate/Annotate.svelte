@@ -77,7 +77,13 @@
     if (highlightQuote === q && highlights.length > 0) return;
     removeHighlight();
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
+    // No live selection (e.g. the test seam drives a quote directly, or the
+    // selection collapsed): fall back to anchoring by the first matching
+    // text node, as the payload does.
+    if (!sel || sel.rangeCount === 0) {
+      wrapByString(q);
+      return;
+    }
     const range = sel.getRangeAt(0);
     if (!contentEl.contains(range.commonAncestorContainer) || range.collapsed) {
       wrapByString(q);
@@ -360,7 +366,7 @@
               {#if annotations.length === 0}
                 <li class="italic py-2 text-[color-mix(in_oklch,var(--color-ink)_40%,transparent)]">No annotations yet.</li>
               {:else}
-                {#each annotations as a, i (a.created)}
+                {#each annotations as a, i (a.created + "-" + i)}
                   {@const isPriority = a.kind !== "note" && (a as { priority?: boolean }).priority === true}
                   {@const isRange = a.kind === "range"}
                   {@const expanded = expandedRows[a.created] === true}

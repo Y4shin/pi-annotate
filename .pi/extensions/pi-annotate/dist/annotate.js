@@ -4198,7 +4198,10 @@
       if (highlightQuote === q && highlights.length > 0) return;
       removeHighlight();
       const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0) return;
+      if (!sel || sel.rangeCount === 0) {
+        wrapByString(q);
+        return;
+      }
       const range = sel.getRangeAt(0);
       if (!get(contentEl).contains(range.commonAncestorContainer) || range.collapsed) {
         wrapByString(q);
@@ -4506,7 +4509,7 @@
               var alternate = ($$anchor4) => {
                 var fragment_1 = comment();
                 var node_4 = first_child(fragment_1);
-                each(node_4, 19, () => get(annotations), (a) => a.created, ($$anchor5, a) => {
+                each(node_4, 19, () => get(annotations), (a, i) => a.created + "-" + i, ($$anchor5, a) => {
                   const isPriority = /* @__PURE__ */ user_derived(() => get(a).kind !== "note" && get(a).priority === true);
                   const isRange = /* @__PURE__ */ user_derived(() => get(a).kind === "range");
                   const expanded = /* @__PURE__ */ user_derived(() => get(expandedRows)[get(a).created] === true);
