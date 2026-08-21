@@ -1,0 +1,1 @@
+{"$schema": "https://pi.dev/schema/settings.json", "packages": [{"source": "git:github.com/Y4shin/pi-annotate", "extensions": [], "skills": [], "prompts": [], "themes": []}]}
