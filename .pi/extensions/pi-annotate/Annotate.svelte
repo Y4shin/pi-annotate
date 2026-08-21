@@ -446,19 +446,3 @@
     </div>
   {/if}
 </div>
-
-<style>
-  /* The on-text redline span is created imperatively (wrapHighlight splits
-     text nodes at runtime), so Svelte cannot scope styles to it. The styles
-     use the same Redline Proof tokens as the old inline Tailwind classes. */
-  :global(.pi-annotate-redline) {
-    background: linear-gradient(
-      to bottom,
-      transparent 0 30%,
-      color-mix(in oklch, var(--color-redline) 22%, transparent) 30% 88%,
-      transparent 88% 100%
-    );
-    border-bottom: 2px solid var(--color-redline);
-    padding-bottom: 1px;
-  }
-</style>

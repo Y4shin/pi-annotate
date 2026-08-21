@@ -1,17 +1,29 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 
-// Builds the Annotate editor Svelte component into a single self-contained
-// JS bundle (dist/annotate.js) that client.ts inlines into htmlShell() — the
-// same delivery model the project already uses for the compiled CSS bundle
-// (dist/annotate.css). End users get a pre-built string; svelte is a
-// devDependency only, never shipped.
+// Two modes from this one config:
+//   - `npm run build:svelte` (vite build): compiles the Annotate editor Svelte
+//     component into a single self-contained IIFE bundle (dist/annotate.js)
+//     that client.ts inlines into htmlShell() — the same delivery model the
+//     project already uses for the compiled CSS bundle. svelte is a
+//     devDependency only; end users get a pre-built string, no runtime deps.
+//   - `npm run live` (vite): dev server serving live/index.html, which mounts
+//     the SAME Annotate.svelte component so Impeccable live's component-preview
+//     mode (gated on the .svelte extension) can wrap and mount variants against
+//     the real component source.
 //
-// `lib` mode with `inlineDynamicImports` produces one file with the Svelte
-// runtime inlined, so the bundle runs in the served HTML string with no
-// module graph and no runtime npm dependencies.
+// The dev server keeps the project root (so the build entry, the extension's
+// compiled CSS, and the sample doc all resolve); live/index.html is served at
+// /live/index.html and `npm run live` opens it.
 export default defineConfig({
   plugins: [svelte()],
+  server: {
+    host: "127.0.0.1",
+    // Random free port by default (bind to 0); pin with PORT=…
+    port: Number(process.env.PORT) || 0,
+    strictPort: false,
+    open: "/live/index.html",
+  },
   build: {
     lib: {
       // main.ts imports Annotate.svelte and mounts it into #app. Building

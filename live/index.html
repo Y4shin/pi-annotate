@@ -1,0 +1,49 @@
+<!doctype html
+  lang="en">
+<!--
+  Dev entry for the pi-annotate editor, served by `npm run live` (Vite dev
+  server). It mounts the SAME Annotate.svelte component the production build
+  compiles, so Impeccable live's component-preview mode can wrap and mount
+  variants against the real component source. A tiny fetch shim stubs
+  /api/doc with the sample doc so the editor renders without the pi extension
+  server; the real server.ts codepath is exercised by the production build
+  and the unit/e2e tests.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Annotate — Live</title>
+    <link rel="stylesheet" href="/.pi/extensions/pi-annotate/dist/annotate.css" />
+  </head>
+  <body class="bg-paper text-ink leading-[1.7]">
+    <div id="app"></div>
+    <script>
+      // Fetch shim: stub /api/doc with the live sample doc so the editor
+      // renders without the pi extension server. POST /api/annotations is
+      // swallowed (live iteration doesn't persist submits).
+      (function () {
+        var origFetch = window.fetch;
+        window.fetch = function (url, opts) {
+          if (url === "/api/doc" && (!opts || !opts.method || opts.method === "GET")) {
+            return origFetch("/live/sample-doc.md").then(function (res) {
+              return res.text().then(function (markdown) {
+                return {
+                  ok: true,
+                  json: function () {
+                    return Promise.resolve({ path: "live/sample-doc.md", markdown: markdown });
+                  },
+                };
+              });
+            });
+          }
+          if (url === "/api/annotations") {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ ok: true }); } });
+          }
+          return origFetch(url, opts);
+        };
+      })();
+    </script>
+    <script type="module" src="/.pi/extensions/pi-annotate/main.ts"></script>
+  </body>
+</html>

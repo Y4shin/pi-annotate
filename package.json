@@ -24,7 +24,7 @@
     "build:svelte": "vite build",
     "build:preview": "node .pi/extensions/pi-annotate/preview.mjs",
     "build": "npm run build:css && npm run build:svelte && npm run build:preview",
-    "live": "node scripts/live-dev.mjs",
+    "live": "vite",
     "test:e2e": "playwright test --config playwright.config.ts"
   },
   "devDependencies": {
