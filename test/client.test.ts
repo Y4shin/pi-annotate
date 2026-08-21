@@ -126,10 +126,19 @@ describe("annotation UI", () => {
     expect(annotations[1]).toMatchObject({ kind: "block", blockIndex: 0, comment: "block comment" });
     expect(annotations[2]).toMatchObject({ kind: "range", quote: "selected text", comment: "range comment" });
 
+    // Global tab shows whole-document notes only.
     const list = app.querySelector(".annotation-list")!;
     expect(list.innerHTML).toContain("first note");
-    expect(list.innerHTML).toContain("block #0");
-    expect(list.innerHTML).toContain("selected text");
+
+    // Switch to the Local tab: anchored marks (block + range) live there.
+    const localTab = [...app.querySelectorAll<HTMLElement>("[role=tablist] .tab")].find((b) => /local/i.test(b.textContent || ""))!;
+    localTab.click();
+    await new Promise((r) => setTimeout(r, 20));
+
+    const items = app.querySelectorAll(".annotation-item");
+    const canvasHtml = [...items].map((el) => el.innerHTML).join("\n");
+    expect(canvasHtml).toContain("block #0");
+    expect(canvasHtml).toContain("selected text");
   });
 
   it("deletes an annotation from the list", async () => {

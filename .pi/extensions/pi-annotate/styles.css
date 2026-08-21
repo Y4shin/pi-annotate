@@ -56,3 +56,75 @@
   border-bottom: 2px solid var(--color-redline);
   padding-bottom: 1px;
 }
+
+/* Feedback tabs live on daisyUI's .tabs / .tab roles (live-bound to the
+   active nord theme). The earned-redline accent is layered on the active
+   tab — the page's own material token, not a frozen theme hue — per
+   DESIGN.md's Theme-Bound, Not Hard-Coded rule. Scoped to .annotation-panel
+   so it only touches the feedback-scope tabs. */
+.annotation-panel .tabs-border > .tab-active {
+  color: var(--color-redline);
+  border-color: var(--color-redline);
+}
+
+/* Local spatial-sync canvas. Active only when the Local tab is on; the rail
+   becomes overflow-hidden and items are absolutely positioned to their
+   source block tops. Faint, flat, print-shop — never urgency theater. */
+
+/* Marked source section: a faint paper-cool / redline-mix wash over the
+   whole block, so the reader sees 'this is marked' without the ground
+   losing its calm. Theme-bound via the page's own paper/ink tokens; the
+   redline mix is the earned accent at low strength. */
+.content .annotatable-block.is-marked {
+  background: linear-gradient(
+    to right,
+    color-mix(in oklch, var(--color-paper-cool) 60%, transparent) 0%,
+    color-mix(in oklch, var(--color-paper) 70%, transparent) 100%
+  );
+  box-shadow: inset 2px 0 0 color-mix(in oklch, var(--color-redline) 22%, transparent);
+}
+
+/* Connector layer: spans the layout grid so paths can route from the doc
+   column into the rail. Faint hairline weight, redline at low alpha — a
+   print-shop leader, not a wire. */
+.anno-connector-layer {
+  /* The layout is the stacking context: leaders must sit above the document
+     surface to be visible, while .anno-canvas (z-index: 2) keeps cards above
+     their incoming line. */
+  z-index: 1;
+  overflow: visible;
+}
+.doc-col { z-index: 0; }
+.pi-annotate-margin { z-index: 2; }
+.anno-connector {
+  stroke: color-mix(in oklch, var(--color-redline) 38%, transparent);
+  stroke-width: 1px;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Pinned annotation items sit above the connector layer. */
+.anno-canvas { z-index: 2; }
+.anno-pin {
+  box-shadow: 0 0 0 1px var(--color-hairline) inset;
+}
+
+/* Off-screen indicators: small, quiet chips at the rail's edges counting
+   hidden items. Mono + tabular, the print-shop furniture voice. */
+.anno-hidden-indicator {
+  position: absolute;
+  left: 0;
+  right: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.4rem;
+  background: color-mix(in oklch, var(--color-paper) 88%, var(--color-ink) 8%);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-proof);
+  color: color-mix(in oklch, var(--color-ink) 55%, transparent);
+}
+.anno-hidden-top { top: 0; }
+.anno-hidden-bottom { bottom: 0; }

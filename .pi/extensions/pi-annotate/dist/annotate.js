@@ -117,6 +117,8 @@
   }
   const EACH_ITEM_REACTIVE = 1;
   const EACH_INDEX_REACTIVE = 1 << 1;
+  const EACH_IS_CONTROLLED = 1 << 2;
+  const EACH_IS_ANIMATED = 1 << 3;
   const EACH_ITEM_IMMUTABLE = 1 << 4;
   const TEMPLATE_FRAGMENT = 1;
   const TEMPLATE_USE_IMPORT_NODE = 1 << 1;
@@ -305,8 +307,8 @@
       set_active_effect(previous_effect);
     }
   }
-  function listen_to_event_and_reset_event(element, event, handler, on_reset = handler) {
-    element.addEventListener(event, () => without_reactive_context(handler));
+  function listen_to_event_and_reset_event(element, event2, handler, on_reset = handler) {
+    element.addEventListener(event2, () => without_reactive_context(handler));
     const prev = (
       /** @type {any} */
       element[FORM_RESET_HANDLER]
@@ -2922,6 +2924,38 @@
   const event_symbol = /* @__PURE__ */ Symbol("events");
   const all_registered_events = /* @__PURE__ */ new Set();
   const root_event_handles = /* @__PURE__ */ new Set();
+  function create_event(event_name, dom, handler, options = {}) {
+    function target_handler(event2) {
+      if (!options.capture) {
+        handle_event_propagation.call(dom, event2);
+      }
+      if (!event2.cancelBubble) {
+        return without_reactive_context(() => {
+          return handler?.call(this, event2);
+        });
+      }
+    }
+    if (event_name.startsWith("pointer") || event_name.startsWith("touch") || event_name === "wheel") {
+      queue_micro_task(() => {
+        dom.addEventListener(event_name, target_handler, options);
+      });
+    } else {
+      dom.addEventListener(event_name, target_handler, options);
+    }
+    return target_handler;
+  }
+  function event(event_name, dom, handler, capture2, passive) {
+    var options = { capture: capture2, passive };
+    var target_handler = create_event(event_name, dom, handler, options);
+    if (dom === document.body || // @ts-ignore
+    dom === window || // @ts-ignore
+    dom === document || // Firefox has quirky behavior, it can happen that we still get "canplay" events when the element is already removed
+    dom instanceof HTMLMediaElement) {
+      teardown(() => {
+        dom.removeEventListener(event_name, target_handler, options);
+      });
+    }
+  }
   function delegated(event_name, element, handler) {
     (element[event_symbol] ??= {})[event_name] = handler;
   }
@@ -2935,19 +2969,19 @@
   }
   let last_propagated_event = null;
   let last_propagated_event_clear_scheduled = false;
-  function handle_event_propagation(event) {
+  function handle_event_propagation(event2) {
     var handler_element = this;
     var owner_document = (
       /** @type {Node} */
       handler_element.ownerDocument
     );
-    var event_name = event.type;
-    var path = event.composedPath?.() || [];
+    var event_name = event2.type;
+    var path = event2.composedPath?.() || [];
     var current_target = (
       /** @type {null | Element} */
-      path[0] || event.target
+      path[0] || event2.target
     );
-    last_propagated_event = event;
+    last_propagated_event = event2;
     if (!last_propagated_event_clear_scheduled) {
       last_propagated_event_clear_scheduled = true;
       setTimeout(() => {
@@ -2956,12 +2990,12 @@
       });
     }
     var path_idx = 0;
-    var handled_at = last_propagated_event === event && event[event_symbol];
+    var handled_at = last_propagated_event === event2 && event2[event_symbol];
     if (handled_at) {
       var at_idx = path.indexOf(handled_at);
       if (at_idx !== -1 && (handler_element === document || handler_element === /** @type {any} */
       window)) {
-        event[event_symbol] = handler_element;
+        event2[event_symbol] = handler_element;
         return;
       }
       var handler_idx = path.indexOf(handler_element);
@@ -2973,9 +3007,9 @@
       }
     }
     current_target = /** @type {Element} */
-    path[path_idx] || event.target;
+    path[path_idx] || event2.target;
     if (current_target === handler_element) return;
-    define_property(event, "currentTarget", {
+    define_property(event2, "currentTarget", {
       configurable: true,
       get() {
         return current_target || owner_document;
@@ -2995,8 +3029,8 @@
           if (delegated2 != null && (!/** @type {any} */
           current_target.disabled || // DOM could've been updated already by the time this is reached, so we check this as well
           // -> the target could not have been disabled because it emits the event in the first place
-          event.target === current_target)) {
-            delegated2.call(current_target, event);
+          event2.target === current_target)) {
+            delegated2.call(current_target, event2);
           }
         } catch (error) {
           if (throw_error) {
@@ -3005,7 +3039,7 @@
             throw_error = error;
           }
         }
-        if (event.cancelBubble) break;
+        if (event2.cancelBubble) break;
         path_idx++;
         current_target = path_idx < path.length ? (
           /** @type {Element} */
@@ -3021,8 +3055,8 @@
         throw throw_error;
       }
     } finally {
-      event[event_symbol] = handler_element;
-      delete event.currentTarget;
+      event2[event_symbol] = handler_element;
+      delete event2.currentTarget;
       set_active_reaction(previous_reaction);
       set_active_effect(previous_effect);
     }
@@ -3121,14 +3155,6 @@
   // @__NO_SIDE_EFFECTS__
   function from_svg(content, flags2) {
     return /* @__PURE__ */ from_namespace(content, flags2, "svg");
-  }
-  function comment() {
-    var frag = document.createDocumentFragment();
-    var start = document.createComment("");
-    var anchor = create_text();
-    frag.append(start, anchor);
-    assign_nodes(start, anchor);
-    return frag;
   }
   function append(anchor, dom) {
     if (anchor === null) {
@@ -3500,6 +3526,14 @@
   function each(node, flags2, get_collection, get_key, render_fn, fallback_fn = null) {
     var anchor = node;
     var items = /* @__PURE__ */ new Map();
+    var is_controlled = (flags2 & EACH_IS_CONTROLLED) !== 0;
+    if (is_controlled) {
+      var parent_node = (
+        /** @type {Element} */
+        node
+      );
+      anchor = parent_node.appendChild(create_text());
+    }
     var fallback = null;
     var each_array = /* @__PURE__ */ derived_safe_equal(() => {
       var collection = get_collection();
@@ -3613,17 +3647,31 @@
     return effect2;
   }
   function reconcile(state2, array, anchor, flags2, get_key) {
+    var is_animated = (flags2 & EACH_IS_ANIMATED) !== 0;
     var length = array.length;
     var items = state2.items;
     var current = skip_to_branch(state2.effect.first);
     var seen;
     var prev = null;
+    var to_animate;
     var matched = [];
     var stashed = [];
     var value;
     var key;
     var effect2;
     var i;
+    if (is_animated) {
+      for (i = 0; i < length; i += 1) {
+        value = array[i];
+        key = get_key(value, i);
+        effect2 = /** @type {EachItem} */
+        items.get(key).e;
+        if ((effect2.f & EFFECT_OFFSCREEN) === 0) {
+          effect2.nodes?.a?.measure();
+          (to_animate ??= /* @__PURE__ */ new Set()).add(effect2);
+        }
+      }
+    }
     for (i = 0; i < length; i += 1) {
       value = array[i];
       key = get_key(value, i);
@@ -3637,6 +3685,10 @@
       }
       if ((effect2.f & INERT) !== 0) {
         resume_effect(effect2);
+        if (is_animated) {
+          effect2.nodes?.a?.unfix();
+          (to_animate ??= /* @__PURE__ */ new Set()).delete(effect2);
+        }
       }
       if ((effect2.f & EFFECT_OFFSCREEN) !== 0) {
         effect2.f ^= EFFECT_OFFSCREEN;
@@ -3736,9 +3788,25 @@
       }
       var destroy_length = to_destroy.length;
       if (destroy_length > 0) {
-        var controlled_anchor = null;
+        var controlled_anchor = (flags2 & EACH_IS_CONTROLLED) !== 0 && length === 0 ? anchor : null;
+        if (is_animated) {
+          for (i = 0; i < destroy_length; i += 1) {
+            to_destroy[i].nodes?.a?.measure();
+          }
+          for (i = 0; i < destroy_length; i += 1) {
+            to_destroy[i].nodes?.a?.fix();
+          }
+        }
         pause_effects(state2, to_destroy, controlled_anchor);
       }
+    }
+    if (is_animated) {
+      queue_micro_task(() => {
+        if (to_animate === void 0) return;
+        for (effect2 of to_animate) {
+          effect2.nodes?.a?.apply();
+        }
+      });
     }
   }
   function create_item(items, anchor, value, key, index, render_fn, flags2, get_collection) {
@@ -4164,15 +4232,18 @@
     return blocks.join("\n");
   }
   var root = /* @__PURE__ */ from_html(`<p> </p>`);
-  var root_1 = /* @__PURE__ */ from_html(`<li class="italic py-2 text-[color-mix(in_oklch,var(--color-ink)_40%,transparent)]">No annotations yet.</li>`);
+  var root_1 = /* @__PURE__ */ from_html(`<div class="empty-line"> </div>`);
   var root_2 = /* @__PURE__ */ from_html(`<div> </div>`);
-  var root_3 = /* @__PURE__ */ from_html(`<li><div class="flex items-center gap-1"><span> </span> <span class="flex-1"></span> <button data-action="delete" aria-label="Delete annotation" class="shrink-0 bg-transparent border-none text-[color-mix(in_oklch,var(--color-ink)_35%,transparent)] cursor-pointer text-base leading-none px-[0.2rem] hover:text-redline"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"></path></svg></button></div> <!> <div> </div></li>`);
-  var root_4 = /* @__PURE__ */ from_svg(`<svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 14v-2h7v2zm0-4V8h11v2zm0-4V4h11v2zm9 14v-3.075l5.525-5.5q.225-.225.5-.325t.55-.1q.3 0 .575.113t.5.337l.925.925q.2.225.313.5t.112.55t-.1.563t-.325.512l-5.5 5.5zm6.575-5.6l.925-.975l-.925-.925l-.95.95z"></path></svg>`);
-  var root_5 = /* @__PURE__ */ from_svg(`<svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12.013 2t3.875.788t3.175 2.15t2.15 3.175t.787 3.875t-.787 3.887t-2.15 3.188t-3.175 2.15t-3.875.787"></path></svg>`);
-  var root_6 = /* @__PURE__ */ from_html(`<div class="annotation-panel flex-1 flex flex-col gap-3 mt-0 [&amp;_h2]:font-mono [&amp;_h2]:text-[0.6875rem] [&amp;_h2]:font-semibold [&amp;_h2]:tracking-[0.08em] [&amp;_h2]:uppercase [&amp;_h2]:text-[color-mix(in_oklch,var(--color-ink)_55%,transparent)] [&amp;_h2]:mb-3"><h2>Annotations</h2> <ul class="annotation-list list-none p-0 m-0 flex-1 min-h-8"><!></ul> <div class="note-box flex flex-col gap-2 my-3 mb-4"><textarea rows="2" class="flex-1 bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-ink)_4%)] border border-hairline rounded-proof text-ink text-[0.875rem] leading-[1.5] py-[0.4rem] px-2 resize-y focus:outline-none focus:border-[color-mix(in_oklch,var(--color-redline)_60%,transparent)]"></textarea> <div class="flex items-center gap-2"><button data-action="add-note" class="send-btn flex items-center gap-1.5 bg-redline text-[oklch(98%_0.01_70)] rounded-proof border border-[color-mix(in_oklch,var(--color-redline)_75%,black_10%)] font-mono text-[0.8rem] font-semibold tracking-[0.04em] uppercase cursor-pointer py-[0.3rem] px-[0.7rem] hover:bg-[color-mix(in_oklch,var(--color-redline)_92%,black_8%)] transition-colors duration-150 ease-linear group relative"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 20v-6l8-2l-8-2V4l19 8z"></path></svg> <span>Send</span></button> <button data-action="priority-note" class="priority-btn flex items-center gap-1.5 bg-transparent text-[oklch(52%_0.18_28)] rounded-proof border border-[color-mix(in_oklch,var(--color-redline)_60%,transparent)] font-mono text-[0.8rem] font-semibold tracking-[0.04em] uppercase cursor-pointer py-[0.3rem] px-[0.7rem] hover:bg-[color-mix(in_oklch,var(--color-redline)_10%,transparent)] transition-colors duration-150 ease-linear group relative"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 21q-.825 0-1.412-.587T10 19t.588-1.412T12 17t1.413.588T14 19t-.587 1.413T12 21m-2-6V3h4v12z"></path></svg> <span>Priority</span></button> <button data-action="toggle-mode"><!></button></div></div></div>`);
-  var root_7 = /* @__PURE__ */ from_html(`<div class="done-state mt-auto shrink-0 mt-6 p-4 px-5 bg-[color-mix(in_oklch,var(--color-paper)_90%,var(--color-redline)_6%)] border border-hairline rounded-proof text-ink font-mono text-[0.85rem]">Done — you can close this tab</div>`);
-  var root_8 = /* @__PURE__ */ from_html(`<div class="pi-annotate-endlabel shrink-0 font-mono text-[0.6875rem] tracking-[0.08em] uppercase text-[color-mix(in_oklch,var(--color-ink)_60%,transparent)] border-b border-hairline"><span> </span> <span class="float-right"><span class="pi-annotate-count text-redline tabular-nums"> </span></span></div> <div class="pi-annotate-layout flex-1 min-h-0 overflow-hidden grid grid-cols-[minmax(0,1fr)_22rem] gap-8 max-[860px]:grid-cols-1"><div class="doc-col relative overflow-y-auto pl-14 max-[860px]:pl-6"><h1> </h1> <div class="content pi-annotate-doc bg-transparent text-[1.0625rem] leading-[1.8] max-w-[68ch] [&amp;_h1]:font-bold [&amp;_h1]:tracking-[-0.02em] [&amp;_h1]:leading-[1.15] [&amp;_h1]:my-[1.6rem_0.7rem] [&amp;_h1]:text-[1.85rem] [&amp;_h2]:font-semibold [&amp;_h2]:tracking-[-0.01em] [&amp;_h2]:my-[1.8rem_0.65rem] [&amp;_h2]:text-[1.4rem] [&amp;_p]:my-[0.7rem] [&amp;_ul]:my-[0.8rem] [&amp;_ul]:pl-[1.4rem] [&amp;_li]:my-[0.35rem] [&amp;_blockquote]:my-[1.1rem] [&amp;_blockquote]:py-[0.4rem] [&amp;_blockquote]:pr-0 [&amp;_blockquote]:pl-[1.1rem] [&amp;_blockquote]:border-l-2 [&amp;_blockquote]:border-hairline [&amp;_blockquote]:text-[color-mix(in_oklch,var(--color-ink)_75%,transparent)] [&amp;_blockquote]:italic [&amp;_pre]:my-[1.1rem] [&amp;_pre]:py-[0.9rem] [&amp;_pre]:px-[1.1rem] [&amp;_pre]:bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-ink)_8%)] [&amp;_pre]:border [&amp;_pre]:border-hairline [&amp;_pre]:rounded-proof [&amp;_pre]:overflow-x-auto [&amp;_code]:font-mono [&amp;_code]:bg-[color-mix(in_oklch,var(--color-paper)_88%,var(--color-ink)_12%)] [&amp;_code]:rounded-proof [&amp;_pre_code]:bg-transparent [&amp;_a]:text-redline [&amp;_a]:underline [&amp;_a]:decoration-[color-mix(in_oklch,var(--color-redline)_40%,transparent)] [&amp;_a]:underline-offset-2"></div> <button data-action="submit" aria-label="Send to agent" class="btn btn-circle fixed bottom-4 right-[24rem] z-50 max-[860px]:right-4 bg-redline text-[oklch(98%_0.01_70)] border-2 border-[color-mix(in_oklch,var(--color-redline)_75%,black_10%)] shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--color-redline)_30%,transparent)] hover:bg-[color-mix(in_oklch,var(--color-redline)_92%,black_8%)] transition-colors duration-150 ease-linear group"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 20v-6l8-2l-8-2V4l19 8z"></path></svg> <span class="tooltip-label pointer-events-none absolute -top-9 right-0 whitespace-nowrap bg-ink text-paper text-[0.65rem] font-mono px-2 py-0.5 rounded-proof opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10">Send to agent</span></button></div> <div class="pi-annotate-margin h-full overflow-y-auto flex flex-col border-l border-hairline pl-6 pb-6"><!></div></div>`, 1);
-  var root_9 = /* @__PURE__ */ from_html(`<div id="app" class="pi-annotate-app h-screen overflow-hidden flex flex-col text-ink leading-[1.7] bg-paper !bg-[radial-gradient(120%_80%_at_0%_0%,var(--color-paper-warm)_0%,transparent_50%),radial-gradient(120%_80%_at_100%_100%,var(--color-paper-cool)_0%,transparent_50%)] [&amp;_h1]:text-ink [&amp;_h2]:text-ink [&amp;_h3]:text-ink [&amp;_h4]:text-ink [&amp;_h5]:text-ink [&amp;_h6]:text-ink [&amp;_p]:text-ink [&amp;_li]:text-ink [&amp;_blockquote]:text-ink"><!></div>`);
+  var root_3 = /* @__PURE__ */ from_html(`<div><div class="flex items-center gap-1"><span> </span> <span class="flex-1"></span> <button data-action="delete" aria-label="Delete annotation" class="shrink-0 bg-transparent border-none text-[color-mix(in_oklch,var(--color-ink)_35%,transparent)] cursor-pointer text-base leading-none px-[0.2rem] hover:text-redline"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"></path></svg></button></div> <!> <div> </div></div>`);
+  var root_4 = /* @__PURE__ */ from_html(`<div class="anno-canvas relative flex-1 min-h-0"><!> <div class="anno-hidden-indicator anno-hidden-top" aria-hidden="true" style="display:none"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M6 3v6M3 6l3-3 3 3"></path></svg> <span class="font-mono text-[0.625rem] tabular-nums" data-count="">0</span></div> <div class="anno-hidden-indicator anno-hidden-bottom" aria-hidden="true" style="display:none"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M6 9V3M3 6l3 3 3-3"></path></svg> <span class="font-mono text-[0.625rem] tabular-nums" data-count="">0</span></div></div>`);
+  var root_5 = /* @__PURE__ */ from_html(`<li><div class="flex items-center gap-1"><span> </span> <span class="flex-1"></span> <button data-action="delete" aria-label="Delete annotation" class="shrink-0 bg-transparent border-none text-[color-mix(in_oklch,var(--color-ink)_35%,transparent)] cursor-pointer text-base leading-none px-[0.2rem] hover:text-redline"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"></path></svg></button></div> <!> <div> </div></li>`);
+  var root_6 = /* @__PURE__ */ from_html(`<ul class="annotation-list list-none p-0 m-0 flex-1 min-h-8"></ul>`);
+  var root_7 = /* @__PURE__ */ from_svg(`<svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 14v-2h7v2zm0-4V8h11v2zm0-4V4h11v2zm9 14v-3.075l5.525-5.5q.225-.225.5-.325t.55-.1q.3 0 .575.113t.5.337l.925.925q.2.225.313.5t.112.55t-.1.563t-.325.512l-5.5 5.5zm6.575-5.6l.925-.975l-.925-.925l-.95.95z"></path></svg>`);
+  var root_8 = /* @__PURE__ */ from_svg(`<svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12.013 2t3.875.788t3.175 2.15t2.15 3.175t.787 3.875t-.787 3.887t-2.15 3.188t-3.175 2.15t-3.875.787"></path></svg>`);
+  var root_9 = /* @__PURE__ */ from_html(`<div class="annotation-panel flex-1 flex flex-col gap-3 mt-0 [&amp;_h2]:font-mono [&amp;_h2]:text-[0.6875rem] [&amp;_h2]:font-semibold [&amp;_h2]:tracking-[0.08em] [&amp;_h2]:uppercase [&amp;_h2]:text-[color-mix(in_oklch,var(--color-ink)_55%,transparent)] [&amp;_h2]:mb-3"><div role="tablist" aria-label="Feedback scope" class="tabs tabs-border"><button type="button" role="tab">Global<span class="count tabular-nums opacity-60 ml-1"> </span></button> <button type="button" role="tab">Local<span class="count tabular-nums opacity-60 ml-1"> </span></button></div> <div class="panel-label font-mono text-[0.625rem] tracking-[0.06em] uppercase text-[color-mix(in_oklch,var(--color-ink)_50%,transparent)] mb-2 tabular-nums"> </div> <!> <!> <form class="note-box flex flex-col gap-2 my-3 mb-4"><textarea rows="2" class="flex-1 bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-ink)_4%)] border border-hairline rounded-proof text-ink text-[0.875rem] leading-[1.5] py-[0.4rem] px-2 resize-y focus:outline-none focus:border-[color-mix(in_oklch,var(--color-redline)_60%,transparent)]"></textarea> <div class="flex items-center gap-2"><button type="submit" data-action="add-note" class="send-btn flex items-center gap-1.5 bg-redline text-[oklch(98%_0.01_70)] rounded-proof border border-[color-mix(in_oklch,var(--color-redline)_75%,black_10%)] font-mono text-[0.8rem] font-semibold tracking-[0.04em] uppercase cursor-pointer py-[0.3rem] px-[0.7rem] hover:bg-[color-mix(in_oklch,var(--color-redline)_92%,black_8%)] transition-colors duration-150 ease-linear group relative"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 20v-6l8-2l-8-2V4l19 8z"></path></svg> <span>Send</span></button> <button type="button" data-action="priority-note" class="priority-btn flex items-center gap-1.5 bg-transparent text-[oklch(52%_0.18_28)] rounded-proof border border-[color-mix(in_oklch,var(--color-redline)_60%,transparent)] font-mono text-[0.8rem] font-semibold tracking-[0.04em] uppercase cursor-pointer py-[0.3rem] px-[0.7rem] hover:bg-[color-mix(in_oklch,var(--color-redline)_10%,transparent)] transition-colors duration-150 ease-linear group relative"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 21q-.825 0-1.412-.587T10 19t.588-1.412T12 17t1.413.588T14 19t-.587 1.413T12 21m-2-6V3h4v12z"></path></svg> <span>Priority</span></button> <button type="button" data-action="toggle-mode"><!></button></div></form></div>`);
+  var root_10 = /* @__PURE__ */ from_html(`<div class="done-state mt-auto shrink-0 mt-6 p-4 px-5 bg-[color-mix(in_oklch,var(--color-paper)_90%,var(--color-redline)_6%)] border border-hairline rounded-proof text-ink font-mono text-[0.85rem]">Done — you can close this tab</div>`);
+  var root_11 = /* @__PURE__ */ from_html(`<div class="pi-annotate-endlabel shrink-0 font-mono text-[0.6875rem] tracking-[0.08em] uppercase text-[color-mix(in_oklch,var(--color-ink)_60%,transparent)] border-b border-hairline"><span> </span> <span class="float-right"><span class="pi-annotate-count text-redline tabular-nums"> </span></span></div> <div class="pi-annotate-layout flex-1 min-h-0 overflow-hidden grid grid-cols-[minmax(0,1fr)_22rem] gap-8 max-[860px]:grid-cols-1"><svg class="anno-connector-layer pointer-events-none absolute inset-0 w-full h-full" aria-hidden="true"></svg> <div class="doc-col relative overflow-y-auto pl-14 max-[860px]:pl-6"><h1> </h1> <div class="content pi-annotate-doc bg-transparent text-[1.0625rem] leading-[1.8] max-w-[68ch] [&amp;_h1]:font-bold [&amp;_h1]:tracking-[-0.02em] [&amp;_h1]:leading-[1.15] [&amp;_h1]:my-[1.6rem_0.7rem] [&amp;_h1]:text-[1.85rem] [&amp;_h2]:font-semibold [&amp;_h2]:tracking-[-0.01em] [&amp;_h2]:my-[1.8rem_0.65rem] [&amp;_h2]:text-[1.4rem] [&amp;_p]:my-[0.7rem] [&amp;_ul]:my-[0.8rem] [&amp;_ul]:pl-[1.4rem] [&amp;_li]:my-[0.35rem] [&amp;_blockquote]:my-[1.1rem] [&amp;_blockquote]:py-[0.4rem] [&amp;_blockquote]:pr-0 [&amp;_blockquote]:pl-[1.1rem] [&amp;_blockquote]:border-l-2 [&amp;_blockquote]:border-hairline [&amp;_blockquote]:text-[color-mix(in_oklch,var(--color-ink)_75%,transparent)] [&amp;_blockquote]:italic [&amp;_pre]:my-[1.1rem] [&amp;_pre]:py-[0.9rem] [&amp;_pre]:px-[1.1rem] [&amp;_pre]:bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-ink)_8%)] [&amp;_pre]:border [&amp;_pre]:border-hairline [&amp;_pre]:rounded-proof [&amp;_pre]:overflow-x-auto [&amp;_code]:font-mono [&amp;_code]:bg-[color-mix(in_oklch,var(--color-paper)_88%,var(--color-ink)_12%)] [&amp;_code]:rounded-proof [&amp;_pre_code]:bg-transparent [&amp;_a]:text-redline [&amp;_a]:underline [&amp;_a]:decoration-[color-mix(in_oklch,var(--color-redline)_40%,transparent)] [&amp;_a]:underline-offset-2"></div> <button data-action="submit" aria-label="Send to agent" class="btn btn-circle fixed bottom-4 right-[24rem] z-50 max-[860px]:right-4 bg-redline text-[oklch(98%_0.01_70)] border-2 border-[color-mix(in_oklch,var(--color-redline)_75%,black_10%)] shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--color-redline)_30%,transparent)] hover:bg-[color-mix(in_oklch,var(--color-redline)_92%,black_8%)] transition-colors duration-150 ease-linear group"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 20v-6l8-2l-8-2V4l19 8z"></path></svg> <span class="tooltip-label pointer-events-none absolute -top-9 right-0 whitespace-nowrap bg-ink text-paper text-[0.65rem] font-mono px-2 py-0.5 rounded-proof opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10">Send to agent</span></button></div>  <div><!></div></div>`, 1);
+  var root_12 = /* @__PURE__ */ from_html(`<div id="app" class="pi-annotate-app h-screen overflow-hidden flex flex-col text-ink leading-[1.7] bg-paper !bg-[radial-gradient(120%_80%_at_0%_0%,var(--color-paper-warm)_0%,transparent_50%),radial-gradient(120%_80%_at_100%_100%,var(--color-paper-cool)_0%,transparent_50%)] [&amp;_h1]:text-ink [&amp;_h2]:text-ink [&amp;_h3]:text-ink [&amp;_h4]:text-ink [&amp;_h5]:text-ink [&amp;_h6]:text-ink [&amp;_p]:text-ink [&amp;_li]:text-ink [&amp;_blockquote]:text-ink"><!></div>`);
   function Annotate($$anchor, $$props) {
     push($$props, true);
     let currentFile = /* @__PURE__ */ state("");
@@ -4195,7 +4266,7 @@
     }
     function wrapHighlight(q) {
       if (!get(contentEl) || !q) return;
-      if (highlightQuote === q && highlights.length > 0) return;
+      if (highlightQuote === q && highlights.some((span) => span.isConnected)) return;
       removeHighlight();
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0) {
@@ -4285,23 +4356,19 @@
       }
     }
     function submitComposer(priority) {
-      const comment2 = get(commentText).trim();
-      if (!comment2) return;
+      const comment = get(commentText).trim();
+      if (!comment) return;
       if (get(currentQuote)) {
+        const quote = get(currentQuote);
         set(
           annotations,
           [
             ...get(annotations),
-            {
-              kind: "range",
-              quote: get(currentQuote),
-              comment: comment2,
-              created: Date.now(),
-              priority
-            }
+            { kind: "range", quote, comment, created: Date.now(), priority }
           ],
           true
         );
+        requestAnimationFrame(() => wrapHighlight(quote));
       } else if (get(pendingBlockIndex) != null) {
         set(
           annotations,
@@ -4310,7 +4377,7 @@
             {
               kind: "block",
               blockIndex: get(pendingBlockIndex),
-              comment: comment2,
+              comment,
               created: Date.now(),
               priority
             }
@@ -4322,7 +4389,7 @@
           annotations,
           [
             ...get(annotations),
-            { kind: "note", comment: comment2, created: Date.now() }
+            { kind: "note", comment, created: Date.now() }
           ],
           true
         );
@@ -4350,6 +4417,17 @@
       document.addEventListener("selectionchange", onSelectionChange);
       return () => document.removeEventListener("selectionchange", onSelectionChange);
     });
+    user_effect(() => {
+      const onScroll = () => scheduleSync();
+      const onResize = () => scheduleSync();
+      get(docColEl)?.addEventListener("scroll", onScroll, { passive: true });
+      window.addEventListener("resize", onResize);
+      scheduleSync();
+      return () => {
+        get(docColEl)?.removeEventListener("scroll", onScroll);
+        window.removeEventListener("resize", onResize);
+      };
+    });
     let renderedHtml = /* @__PURE__ */ state("");
     async function loadDoc() {
       try {
@@ -4363,18 +4441,18 @@
         set(error, "Error loading document: " + String(err));
       }
     }
-    function addNote(comment2, created) {
+    function addNote(comment, created) {
       if (get(submitted)) return;
       set(
         annotations,
         [
           ...get(annotations),
-          { kind: "note", comment: comment2, created: created ?? Date.now() }
+          { kind: "note", comment, created: created ?? Date.now() }
         ],
         true
       );
     }
-    function addBlock(blockIndex, comment2, created) {
+    function addBlock(blockIndex, comment, created) {
       if (get(submitted)) return;
       set(
         annotations,
@@ -4383,14 +4461,14 @@
           {
             kind: "block",
             blockIndex,
-            comment: comment2,
+            comment,
             created: created ?? Date.now()
           }
         ],
         true
       );
     }
-    function addRange(quote, comment2, created) {
+    function addRange(quote, comment, created) {
       if (get(submitted)) return;
       set(
         annotations,
@@ -4399,7 +4477,7 @@
           {
             kind: "range",
             quote,
-            comment: comment2,
+            comment,
             created: created ?? Date.now()
           }
         ],
@@ -4460,6 +4538,200 @@
         true
       );
     }
+    let activeTab = /* @__PURE__ */ state("global");
+    let globalAnnotations = /* @__PURE__ */ user_derived(() => get(annotations).filter((a) => a.kind === "note"));
+    let localAnnotations = /* @__PURE__ */ user_derived(() => get(annotations).filter((a) => a.kind !== "note"));
+    let tabAnnotations = /* @__PURE__ */ user_derived(() => get(activeTab) === "global" ? get(globalAnnotations) : get(localAnnotations));
+    let docColEl = /* @__PURE__ */ state(void 0);
+    let panelEl = /* @__PURE__ */ state(void 0);
+    let canvasEl = /* @__PURE__ */ state(void 0);
+    let connectorEl = /* @__PURE__ */ state(void 0);
+    let layoutEl = /* @__PURE__ */ state(void 0);
+    let docScroll = /* @__PURE__ */ state(0);
+    let viewportH = /* @__PURE__ */ state(0);
+    let layoutH = /* @__PURE__ */ state(0);
+    let railWidth = /* @__PURE__ */ state(0);
+    let rafPending = false;
+    function rangeStartSpan(a) {
+      if (!get(contentEl)) return null;
+      const spans = Array.from(get(contentEl).querySelectorAll(".pi-annotate-redline"));
+      const joined = spans.map((span) => span.textContent || "").join("");
+      const quoteOffset = joined.indexOf(a.quote);
+      if (quoteOffset >= 0) {
+        let offset = 0;
+        for (const span of spans) {
+          const length = (span.textContent || "").length;
+          if (quoteOffset < offset + length) return span;
+          offset += length;
+        }
+      }
+      return null;
+    }
+    function sourceBlockFor(a) {
+      if (!get(contentEl)) return null;
+      if (a.kind === "block") return get(contentEl).children[a.blockIndex] ?? null;
+      if (a.kind !== "range") return null;
+      let block2 = rangeStartSpan(a);
+      while (block2 && block2.parentElement && block2.parentElement !== get(contentEl)) block2 = block2.parentElement;
+      if (block2) return block2;
+      return Array.from(get(contentEl).children).find((child2) => (child2.textContent || "").includes(a.quote)) ?? null;
+    }
+    function firstTextLineRect(block2) {
+      const walker = document.createTreeWalker(block2, NodeFilter.SHOW_TEXT, {
+        acceptNode: (node) => /\S/.test(node.textContent || "") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+      });
+      const textNode = walker.nextNode();
+      if (!textNode) return null;
+      const range = document.createRange();
+      range.selectNodeContents(textNode);
+      return Array.from(range.getClientRects())[0] ?? null;
+    }
+    function sourceLineRect(a, block2) {
+      if (a.kind === "range") {
+        const rangeRect = rangeStartSpan(a) ? Array.from(rangeStartSpan(a).getClientRects())[0] ?? null : null;
+        if (rangeRect) return rangeRect;
+      }
+      return firstTextLineRect(block2);
+    }
+    function sourceLineCenter(a, block2) {
+      const lineRect = sourceLineRect(a, block2);
+      const blockRect = block2.getBoundingClientRect();
+      return lineRect ? lineRect.top + lineRect.height / 2 : blockRect.top + Math.min(blockRect.height, 24) / 2;
+    }
+    function annoKey(a) {
+      const anchor = a.kind === "range" ? `r:${a.quote}` : a.kind === "block" ? `b:${a.blockIndex}` : "n";
+      return `${a.created}-${anchor}`;
+    }
+    function scheduleSync() {
+      if (rafPending) return;
+      rafPending = true;
+      requestAnimationFrame(() => {
+        rafPending = false;
+        if (get(docColEl)) {
+          set(docScroll, get(docColEl).scrollTop, true);
+          set(viewportH, get(docColEl).clientHeight, true);
+        }
+        if (get(panelEl)) {
+          set(layoutH, get(panelEl).clientHeight, true);
+          set(railWidth, get(panelEl).clientWidth, true);
+        }
+      });
+    }
+    proxy({});
+    let indicatorTopEl = /* @__PURE__ */ state(void 0);
+    let indicatorBottomEl = /* @__PURE__ */ state(void 0);
+    const ITEM_GAP = 8;
+    user_effect(() => {
+      void get(docScroll);
+      void get(viewportH);
+      void get(layoutH);
+      void get(railWidth);
+      void get(activeTab);
+      void get(localAnnotations);
+      void get(expandedRows);
+      void get(contentEl);
+      void get(indicatorTopEl);
+      void get(indicatorBottomEl);
+      void get(layoutEl);
+      if (!get(contentEl) || !get(docColEl) || !get(panelEl) || !get(canvasEl) || !get(connectorEl) || !get(layoutEl)) return;
+      if (get(activeTab) !== "local") return;
+      const docRect = get(docColEl).getBoundingClientRect();
+      const docTop = docRect.top;
+      get(
+        contentEl
+        // content top within doc-col
+      ).getBoundingClientRect().top - docTop;
+      const markedBlocks = /* @__PURE__ */ new Set();
+      for (const a of get(localAnnotations)) {
+        const b = sourceBlockFor(a);
+        if (b) markedBlocks.add(b);
+      }
+      for (const child2 of Array.from(get(contentEl).children)) {
+        child2.classList.toggle("is-marked", markedBlocks.has(child2));
+      }
+      const layouts = [];
+      const itemEls = get(canvasEl).querySelectorAll("[data-anno-key]");
+      const byKey = /* @__PURE__ */ new Map();
+      itemEls.forEach((el) => byKey.set(el.dataset.annoKey || "", el));
+      for (const a of get(localAnnotations)) {
+        const block2 = sourceBlockFor(a);
+        const el = byKey.get(annoKey(a));
+        if (!block2 || !el) continue;
+        const sourceViewportY = sourceLineCenter(a, block2);
+        const sourceDocY = sourceViewportY - docTop;
+        const sourceCanvasY = sourceViewportY - get(canvasEl).getBoundingClientRect().top;
+        const height = el.offsetHeight;
+        const visible = sourceDocY >= 0 && sourceDocY <= get(viewportH) - 4;
+        layouts.push({
+          a,
+          block: block2,
+          top: sourceCanvasY,
+          placedTop: sourceCanvasY,
+          height,
+          visible,
+          above: sourceDocY < 0
+        });
+      }
+      layouts.sort((x, y) => x.top - y.top);
+      for (let i = 1; i < layouts.length; i++) {
+        const prev = layouts[i - 1];
+        const cur = layouts[i];
+        const minTop = prev.placedTop + prev.height + ITEM_GAP;
+        if (cur.placedTop < minTop) cur.placedTop = minTop;
+      }
+      let above = 0;
+      let below = 0;
+      const placed = [];
+      for (const l of layouts) {
+        const el = byKey.get(annoKey(l.a));
+        if (!l.visible) {
+          el.style.display = "none";
+          if (l.above) above++;
+          else below++;
+          continue;
+        }
+        const maxTop = Math.max(0, get(layoutH) - l.height);
+        const top = Math.min(l.placedTop, maxTop);
+        el.style.display = "";
+        el.style.transform = `translateY(${top}px)`;
+        placed.push({ ...l, placedTop: top });
+      }
+      if (get(indicatorTopEl)) {
+        get(indicatorTopEl).style.display = above > 0 ? "" : "none";
+        const countEl = get(indicatorTopEl).querySelector("[data-count]");
+        if (countEl) countEl.textContent = String(above);
+      }
+      if (get(indicatorBottomEl)) {
+        get(indicatorBottomEl).style.display = below > 0 ? "" : "none";
+        const countEl = get(indicatorBottomEl).querySelector("[data-count]");
+        if (countEl) countEl.textContent = String(below);
+      }
+      const svg = get(connectorEl);
+      const layoutRect = get(layoutEl).getBoundingClientRect();
+      const layoutW = get(layoutEl).clientWidth;
+      svg.setAttribute("width", String(layoutW));
+      svg.setAttribute("height", String(get(layoutH)));
+      svg.setAttribute("viewBox", `0 0 ${layoutW} ${get(layoutH)}`);
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      for (const l of placed) {
+        const el = byKey.get(annoKey(l.a));
+        const blockRect = l.block.getBoundingClientRect();
+        const startX = blockRect.right - layoutRect.left;
+        const startY = sourceLineCenter(l.a, l.block) - layoutRect.top;
+        const itemRect = el.getBoundingClientRect();
+        const endX = itemRect.left - layoutRect.left;
+        const endY = itemRect.top - layoutRect.top;
+        const d = Math.abs(startY - endY) < 0.5 ? `M ${startX} ${startY} L ${endX} ${endY}` : (() => {
+          const midX = startX + (endX - startX) * 0.5;
+          return `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`;
+        })();
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", d);
+        path.setAttribute("class", "anno-connector");
+        path.setAttribute("fill", "none");
+        svg.appendChild(path);
+      }
+    });
     loadDoc();
     function annotationCount() {
       return get(annotations).length + " annotation" + (get(annotations).length === 1 ? "" : "s");
@@ -4469,7 +4741,7 @@
       if (a.kind === "block") return "block #" + a.blockIndex;
       return "note";
     }
-    var div = root_9();
+    var div = root_12();
     var node_1 = child(div);
     {
       var consequent = ($$anchor2) => {
@@ -4479,7 +4751,7 @@
         append($$anchor2, p);
       };
       var alternate_3 = ($$anchor2) => {
-        var fragment = root_8();
+        var fragment = root_11();
         var div_1 = first_child(fragment);
         var span_1 = child(div_1);
         var text_2 = child(span_1);
@@ -4487,126 +4759,213 @@
         var span_3 = child(span_2);
         var text_3 = child(span_3);
         var div_2 = sibling(div_1, 2);
-        var div_3 = child(div_2);
+        var svg_1 = child(div_2);
+        bind_this(svg_1, ($$value) => set(connectorEl, $$value), () => get(connectorEl));
+        var div_3 = sibling(svg_1, 2);
         var h1 = child(div_3);
         var text_4 = child(h1);
         var div_4 = sibling(h1, 2);
         html(div_4, () => get(renderedHtml), true);
         bind_this(div_4, ($$value) => set(contentEl, $$value), () => get(contentEl));
         var button = sibling(div_4, 2);
+        bind_this(div_3, ($$value) => set(docColEl, $$value), () => get(docColEl));
         var div_5 = sibling(div_3, 2);
         var node_2 = child(div_5);
         {
-          var consequent_4 = ($$anchor3) => {
-            var div_6 = root_6();
-            var ul = sibling(child(div_6), 2);
-            var node_3 = child(ul);
+          var consequent_6 = ($$anchor3) => {
+            var div_6 = root_9();
+            var div_7 = child(div_6);
+            var button_1 = child(div_7);
+            var span_4 = sibling(child(button_1));
+            var text_5 = child(span_4);
+            var button_2 = sibling(button_1, 2);
+            var span_5 = sibling(child(button_2));
+            var text_6 = child(span_5);
+            var div_8 = sibling(div_7, 2);
+            var text_7 = child(div_8);
+            var node_3 = sibling(div_8, 2);
             {
               var consequent_1 = ($$anchor4) => {
-                var li = root_1();
-                append($$anchor4, li);
+                var div_9 = root_1();
+                var text_8 = child(div_9);
+                template_effect(() => set_text(text_8, get(activeTab) === "global" ? "No global notes yet." : "No local marks yet — select text or a block marker."));
+                append($$anchor4, div_9);
               };
-              var alternate = ($$anchor4) => {
-                var fragment_1 = comment();
-                var node_4 = first_child(fragment_1);
-                each(node_4, 19, () => get(annotations), (a, i) => a.created + "-" + i, ($$anchor5, a) => {
-                  const isPriority = /* @__PURE__ */ user_derived(() => get(a).kind !== "note" && get(a).priority === true);
-                  const isRange = /* @__PURE__ */ user_derived(() => get(a).kind === "range");
-                  const expanded = /* @__PURE__ */ user_derived(() => get(expandedRows)[get(a).created] === true);
-                  var li_1 = root_3();
-                  var div_7 = child(li_1);
-                  var span_4 = child(div_7);
-                  var text_5 = child(span_4);
-                  var button_1 = sibling(span_4, 4);
-                  var node_5 = sibling(div_7, 2);
+              if_block(node_3, ($$render) => {
+                if (get(tabAnnotations).length === 0) $$render(consequent_1);
+              });
+            }
+            var node_4 = sibling(node_3, 2);
+            {
+              var consequent_3 = ($$anchor4) => {
+                var div_10 = root_4();
+                var node_5 = child(div_10);
+                each(node_5, 19, () => get(localAnnotations), (a, i) => a.created + "-" + i, ($$anchor5, a) => {
+                  var div_11 = root_3();
+                  var div_12 = child(div_11);
+                  var span_6 = child(div_12);
+                  var text_9 = child(span_6);
+                  var button_3 = sibling(span_6, 4);
+                  var node_6 = sibling(div_12, 2);
                   {
                     var consequent_2 = ($$anchor6) => {
-                      var div_8 = root_2();
-                      var text_6 = child(div_8);
+                      var div_13 = root_2();
+                      var text_10 = child(div_13);
                       template_effect(() => {
-                        set_class(div_8, 1, `quote-text ${get(expanded) ? "line-clamp-none" : "line-clamp-2"} text-[0.75rem] italic text-[color-mix(in_oklch,var(--color-ink)_75%,transparent)] border-l-2 border-redline pl-1.5`);
-                        set_text(text_6, get(a).quote);
+                        set_class(div_13, 1, `quote-text ${get(expandedRows)[get(a).created] === true ? "line-clamp-none" : "line-clamp-2"} text-[0.75rem] italic text-[color-mix(in_oklch,var(--color-ink)_75%,transparent)] border-l-2 border-redline pl-1.5`);
+                        set_text(text_10, get(a).quote);
                       });
-                      append($$anchor6, div_8);
+                      append($$anchor6, div_13);
                     };
-                    if_block(node_5, ($$render) => {
-                      if (get(isRange)) $$render(consequent_2);
+                    if_block(node_6, ($$render) => {
+                      if (get(a).kind === "range") $$render(consequent_2);
                     });
                   }
-                  var div_9 = sibling(node_5, 2);
-                  var text_7 = child(div_9);
+                  var div_14 = sibling(node_6, 2);
+                  var text_11 = child(div_14);
                   template_effect(
-                    ($0) => {
-                      set_class(li_1, 1, `annotation-item flex flex-col gap-1 py-2 px-[0.6rem] border rounded-proof mb-2 bg-paper cursor-pointer select-none ${get(isPriority) ? "border-redline bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-redline)_8%)]" : "border-hairline"} ${get(expanded) ? "is-expanded" : ""}`);
-                      set_class(span_4, 1, `annotation-meta font-mono text-[0.625rem] tracking-[0.06em] uppercase shrink-0 pt-[0.15rem] ${get(isPriority) ? "text-redline" : "text-[color-mix(in_oklch,var(--color-ink)_50%,transparent)]"}`);
-                      set_text(text_5, `${$0 ?? ""}${get(isPriority) ? " !" : ""}`);
-                      set_class(div_9, 1, `annotation-comment ${get(expanded) ? "line-clamp-none" : "line-clamp-2"} text-ink text-[0.85rem]`);
-                      set_text(text_7, get(a).comment);
+                    ($0, $1) => {
+                      set_attribute(div_11, "data-anno-key", $0);
+                      set_class(div_11, 1, `annotation-item anno-pin flex flex-col gap-1 py-2 px-[0.6rem] border rounded-proof bg-paper cursor-pointer select-none absolute left-0 right-2 ${get(a).priority === true ? "border-redline bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-redline)_8%)]" : "border-hairline"} ${get(expandedRows)[get(a).created] === true ? "is-expanded" : ""}`);
+                      set_class(span_6, 1, `annotation-meta font-mono text-[0.625rem] tracking-[0.06em] uppercase shrink-0 pt-[0.15rem] ${get(a).priority === true ? "text-redline" : "text-[color-mix(in_oklch,var(--color-ink)_50%,transparent)]"}`);
+                      set_text(text_9, `${$1 ?? ""}${get(a).priority === true ? " !" : ""}`);
+                      set_class(div_14, 1, `annotation-comment ${get(expandedRows)[get(a).created] === true ? "line-clamp-none" : "line-clamp-2"} text-ink text-[0.85rem]`);
+                      set_text(text_11, get(a).comment);
                     },
-                    [() => formatAnnotation(get(a))]
+                    [() => annoKey(get(a)), () => formatAnnotation(get(a))]
                   );
-                  delegated("click", li_1, () => toggleExpand(get(a).created));
-                  delegated("click", button_1, (e) => {
+                  delegated("click", div_11, () => toggleExpand(get(a).created));
+                  delegated("click", button_3, (e) => {
                     e.stopPropagation();
                     deleteAnnotation(get(a).created);
                   });
-                  append($$anchor5, li_1);
+                  append($$anchor5, div_11);
                 });
-                append($$anchor4, fragment_1);
+                var div_15 = sibling(node_5, 2);
+                bind_this(div_15, ($$value) => set(indicatorTopEl, $$value), () => get(indicatorTopEl));
+                var div_16 = sibling(div_15, 2);
+                bind_this(div_16, ($$value) => set(indicatorBottomEl, $$value), () => get(indicatorBottomEl));
+                bind_this(div_10, ($$value) => set(canvasEl, $$value), () => get(canvasEl));
+                append($$anchor4, div_10);
               };
-              if_block(node_3, ($$render) => {
-                if (get(annotations).length === 0) $$render(consequent_1);
+              var alternate = ($$anchor4) => {
+                var ul = root_6();
+                each(ul, 23, () => get(tabAnnotations), (a, i) => a.created + "-" + i, ($$anchor5, a) => {
+                  const isPriority = /* @__PURE__ */ user_derived(() => get(a).kind !== "note" && get(a).priority === true);
+                  const isRange = /* @__PURE__ */ user_derived(() => get(a).kind === "range");
+                  const expanded = /* @__PURE__ */ user_derived(() => get(expandedRows)[get(a).created] === true);
+                  var li = root_5();
+                  var div_17 = child(li);
+                  var span_7 = child(div_17);
+                  var text_12 = child(span_7);
+                  var button_4 = sibling(span_7, 4);
+                  var node_7 = sibling(div_17, 2);
+                  {
+                    var consequent_4 = ($$anchor6) => {
+                      var div_18 = root_2();
+                      var text_13 = child(div_18);
+                      template_effect(() => {
+                        set_class(div_18, 1, `quote-text ${get(expanded) ? "line-clamp-none" : "line-clamp-2"} text-[0.75rem] italic text-[color-mix(in_oklch,var(--color-ink)_75%,transparent)] border-l-2 border-redline pl-1.5`);
+                        set_text(text_13, get(a).quote);
+                      });
+                      append($$anchor6, div_18);
+                    };
+                    if_block(node_7, ($$render) => {
+                      if (get(isRange)) $$render(consequent_4);
+                    });
+                  }
+                  var div_19 = sibling(node_7, 2);
+                  var text_14 = child(div_19);
+                  template_effect(
+                    ($0) => {
+                      set_class(li, 1, `annotation-item flex flex-col gap-1 py-2 px-[0.6rem] border rounded-proof mb-2 bg-paper cursor-pointer select-none ${get(isPriority) ? "border-redline bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-redline)_8%)]" : "border-hairline"} ${get(expanded) ? "is-expanded" : ""}`);
+                      set_class(span_7, 1, `annotation-meta font-mono text-[0.625rem] tracking-[0.06em] uppercase shrink-0 pt-[0.15rem] ${get(isPriority) ? "text-redline" : "text-[color-mix(in_oklch,var(--color-ink)_50%,transparent)]"}`);
+                      set_text(text_12, `${$0 ?? ""}${get(isPriority) ? " !" : ""}`);
+                      set_class(div_19, 1, `annotation-comment ${get(expanded) ? "line-clamp-none" : "line-clamp-2"} text-ink text-[0.85rem]`);
+                      set_text(text_14, get(a).comment);
+                    },
+                    [() => formatAnnotation(get(a))]
+                  );
+                  delegated("click", li, () => toggleExpand(get(a).created));
+                  delegated("click", button_4, (e) => {
+                    e.stopPropagation();
+                    deleteAnnotation(get(a).created);
+                  });
+                  append($$anchor5, li);
+                });
+                append($$anchor4, ul);
+              };
+              if_block(node_4, ($$render) => {
+                if (get(activeTab) === "local" && get(localAnnotations).length > 0) $$render(consequent_3);
                 else $$render(alternate, -1);
               });
             }
-            var div_10 = sibling(ul, 2);
-            var textarea = child(div_10);
-            var div_11 = sibling(textarea, 2);
-            var button_2 = child(div_11);
-            var button_3 = sibling(button_2, 2);
-            var button_4 = sibling(button_3, 2);
-            var node_6 = child(button_4);
+            var form = sibling(node_4, 2);
+            var textarea = child(form);
+            var div_20 = sibling(textarea, 2);
+            var button_5 = sibling(child(div_20), 2);
+            var button_6 = sibling(button_5, 2);
+            var node_8 = child(button_6);
             {
-              var consequent_3 = ($$anchor4) => {
-                var svg = root_4();
-                append($$anchor4, svg);
+              var consequent_5 = ($$anchor4) => {
+                var svg_2 = root_7();
+                append($$anchor4, svg_2);
               };
               var alternate_1 = ($$anchor4) => {
-                var svg_1 = root_5();
-                append($$anchor4, svg_1);
+                var svg_3 = root_8();
+                append($$anchor4, svg_3);
               };
-              if_block(node_6, ($$render) => {
-                if (get(lineMode)) $$render(consequent_3);
+              if_block(node_8, ($$render) => {
+                if (get(lineMode)) $$render(consequent_5);
                 else $$render(alternate_1, -1);
               });
             }
             template_effect(() => {
+              set_class(button_1, 1, `tab font-mono text-[0.6875rem] tracking-[0.08em] uppercase ${get(activeTab) === "global" ? "tab-active" : ""}`);
+              set_text(text_5, get(globalAnnotations).length);
+              set_class(button_2, 1, `tab font-mono text-[0.6875rem] tracking-[0.08em] uppercase ${get(activeTab) === "local" ? "tab-active" : ""}`);
+              set_text(text_6, get(localAnnotations).length);
+              set_text(text_7, `${get(activeTab) === "global" ? "Whole-document notes" : "Anchored marks"} — ${get(tabAnnotations).length ?? ""}`);
               set_attribute(textarea, "placeholder", get(lineMode) ? "Line comment…" : "Add a whole-document note…");
-              set_attribute(button_4, "aria-label", get(lineMode) ? "Line comment — click to clear selection" : "Global comment");
-              set_attribute(button_4, "title", get(lineMode) ? "Line comment — click to clear selection" : "Global comment");
-              set_class(button_4, 1, `mode-toggle flex items-center justify-center bg-transparent text-[color-mix(in_oklch,var(--color-ink)_70%,transparent)] rounded-proof border border-hairline ${get(lineMode) ? "cursor-pointer" : "cursor-default opacity-40"} p-[0.4rem] hover:text-redline transition-colors duration-150 ease-linear group relative ml-auto`);
-              button_4.disabled = !get(lineMode);
+              set_attribute(button_6, "aria-label", get(lineMode) ? "Line comment — click to clear selection" : "Global comment");
+              set_attribute(button_6, "title", get(lineMode) ? "Line comment — click to clear selection" : "Global comment");
+              set_class(button_6, 1, `mode-toggle flex items-center justify-center bg-transparent text-[color-mix(in_oklch,var(--color-ink)_70%,transparent)] rounded-proof border border-hairline ${get(lineMode) ? "cursor-pointer" : "cursor-default opacity-40"} p-[0.4rem] hover:text-redline transition-colors duration-150 ease-linear group relative ml-auto`);
+              button_6.disabled = !get(lineMode);
+            });
+            delegated("click", button_1, () => set(activeTab, "global"));
+            delegated("click", button_2, () => set(activeTab, "local"));
+            event("submit", form, (e) => {
+              e.preventDefault();
+              submitComposer(false);
+            });
+            delegated("keydown", textarea, (e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                submitComposer(false);
+              }
             });
             bind_value(textarea, () => get(commentText), ($$value) => set(commentText, $$value));
-            delegated("click", button_2, () => submitComposer(false));
-            delegated("click", button_3, () => submitComposer(true));
-            delegated("click", button_4, clearSelection);
+            delegated("click", button_5, () => submitComposer(true));
+            delegated("click", button_6, clearSelection);
             append($$anchor3, div_6);
           };
           var alternate_2 = ($$anchor3) => {
-            var div_12 = root_7();
-            append($$anchor3, div_12);
+            var div_21 = root_10();
+            append($$anchor3, div_21);
           };
           if_block(node_2, ($$render) => {
-            if (!get(submitted)) $$render(consequent_4);
+            if (!get(submitted)) $$render(consequent_6);
             else $$render(alternate_2, -1);
           });
         }
+        bind_this(div_5, ($$value) => set(panelEl, $$value), () => get(panelEl));
+        bind_this(div_2, ($$value) => set(layoutEl, $$value), () => get(layoutEl));
         template_effect(
           ($0) => {
             set_text(text_2, get(currentFile));
             set_text(text_3, $0);
             set_text(text_4, get(currentFile));
+            set_class(div_5, 1, `pi-annotate-margin h-full ${get(activeTab) === "local" && get(localAnnotations).length > 0 ? "overflow-hidden" : "overflow-y-auto"} flex flex-col border-l border-hairline pl-6 pb-6`);
           },
           [() => annotationCount()]
         );
@@ -4622,7 +4981,7 @@
     append($$anchor, div);
     pop();
   }
-  delegate(["mouseup", "click"]);
+  delegate(["mouseup", "click", "keydown"]);
   const target = document.getElementById("app");
   if (target) {
     mount(Annotate, { target });

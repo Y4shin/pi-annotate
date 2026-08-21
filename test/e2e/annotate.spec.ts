@@ -48,6 +48,9 @@ test.describe("annotation composer e2e", () => {
     // Send as a normal (non-priority) comment.
     await page.locator('[data-action="add-note"]').click();
 
+    // Range annotations live on the Local tab.
+    await page.getByRole("tab", { name: /Local/ }).click();
+
     // A range annotation row should appear in the list, anchored to the quote.
     const item = page.locator(".annotation-item").first();
     await expect(item).toContainText("Redline Proof");
@@ -76,6 +79,9 @@ test.describe("annotation composer e2e", () => {
 
     // Send via the priority button.
     await page.locator('[data-action="priority-note"]').click();
+
+    // Range annotations live on the Local tab.
+    await page.getByRole("tab", { name: /Local/ }).click();
 
     const item = page.locator(".annotation-item").first();
     await expect(item).toContainText("Redline Proof");
@@ -128,6 +134,40 @@ test.describe("annotation composer e2e", () => {
 
     // The toggle is in line mode (enabled).
     await expect(page.locator('[data-action="toggle-mode"]')).not.toBeDisabled();
+  });
+
+  test("a UI-created cross-format range resolves into the Local canvas", async ({ page }) => {
+    await page.goto(PREVIEW_URL);
+    await expect(page.locator(".content.pi-annotate-doc")).toBeVisible();
+
+    // Cross from bold text into its following plain text, producing more than
+    // one redline span—the exact form a real drag can produce.
+    await page.evaluate(() => {
+      const strong = document.querySelector(".content strong");
+      const paragraph = strong?.parentElement;
+      const trailing = paragraph?.lastChild;
+      if (!strong?.firstChild || !trailing) return;
+      const range = document.createRange();
+      range.setStart(strong.firstChild, 0);
+      range.setEnd(trailing, Math.min(10, trailing.textContent?.length || 0));
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+      document.querySelector(".content")?.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+    await expect(page.locator(".pi-annotate-redline")).toHaveCount(2);
+
+    const textarea = page.locator(".note-box textarea").first();
+    await textarea.fill("cross-format range");
+    await page.locator('[data-action="add-note"]').click();
+    await page.getByRole("tab", { name: /Local/ }).click();
+
+    // This asserts the canvas receives a pinned card, not merely a payload row.
+    const pin = page.locator(".anno-pin").first();
+    await expect(pin).toBeVisible();
+    await expect(pin).toContainText("cross-format range");
+    await expect(page.locator(".anno-connector")).toHaveCount(1);
   });
 
   test("a backwards (focus-before-anchor) selection still highlights", async ({ page }) => {
@@ -244,6 +284,9 @@ test.describe("annotation composer e2e", () => {
       );
     });
 
+    // Range annotations live on the Local tab.
+    await page.getByRole("tab", { name: /Local/ }).click();
+
     const item = page.locator(".annotation-item").first();
     const quote = item.locator(".quote-text");
     const comment = item.locator(".annotation-comment");
@@ -307,6 +350,9 @@ test.describe("annotation composer e2e", () => {
     await textarea.click();
     await textarea.fill("frontmatter note");
     await page.locator('[data-action="add-note"]').click();
+
+    // Range annotations live on the Local tab.
+    await page.getByRole("tab", { name: /Local/ }).click();
 
     const item = page.locator(".annotation-item").first();
     await expect(item).toContainText("title");
