@@ -7,6 +7,7 @@
   var array_from = Array.from;
   var define_property = Object.defineProperty;
   var get_descriptor = Object.getOwnPropertyDescriptor;
+  var get_descriptors = Object.getOwnPropertyDescriptors;
   var object_prototype = Object.prototype;
   var array_prototype = Array.prototype;
   var get_prototype_of = Object.getPrototypeOf;
@@ -54,6 +55,7 @@
   const ASYNC = 1 << 22;
   const ERROR_VALUE = 1 << 23;
   const STATE_SYMBOL = /* @__PURE__ */ Symbol("$state");
+  const LOADING_ATTR_SYMBOL = /* @__PURE__ */ Symbol("");
   const ATTRIBUTES_CACHE = /* @__PURE__ */ Symbol("attributes");
   const CLASS_CACHE = /* @__PURE__ */ Symbol("class");
   const STYLE_CACHE = /* @__PURE__ */ Symbol("style");
@@ -2727,13 +2729,13 @@
   function remove_reaction(signal, dependency) {
     let reactions = dependency.reactions;
     if (reactions !== null) {
-      var index2 = index_of.call(reactions, signal);
-      if (index2 !== -1) {
+      var index = index_of.call(reactions, signal);
+      if (index !== -1) {
         var new_length = reactions.length - 1;
         if (new_length === 0) {
           reactions = dependency.reactions = null;
         } else {
-          reactions[index2] = reactions[new_length];
+          reactions[index] = reactions[new_length];
           reactions.pop();
         }
       }
@@ -3086,6 +3088,40 @@
       return clone;
     };
   }
+  // @__NO_SIDE_EFFECTS__
+  function from_namespace(content, flags2, ns = "svg") {
+    var has_start = !content.startsWith("<!>");
+    var wrapped = `<${ns}>${has_start ? content : "<!>" + content}</${ns}>`;
+    var node;
+    return () => {
+      if (!node) {
+        var fragment = (
+          /** @type {DocumentFragment} */
+          create_fragment_from_html(wrapped)
+        );
+        var root2 = (
+          /** @type {Element} */
+          /* @__PURE__ */ get_first_child(fragment)
+        );
+        {
+          node = /** @type {Element} */
+          /* @__PURE__ */ get_first_child(root2);
+        }
+      }
+      var clone = (
+        /** @type {TemplateNode} */
+        node.cloneNode(true)
+      );
+      {
+        assign_nodes(clone, clone);
+      }
+      return clone;
+    };
+  }
+  // @__NO_SIDE_EFFECTS__
+  function from_svg(content, flags2) {
+    return /* @__PURE__ */ from_namespace(content, flags2, "svg");
+  }
   function comment() {
     var frag = document.createDocumentFragment();
     var start = document.createComment("");
@@ -3381,9 +3417,6 @@
       }
     }, flags2);
   }
-  function index(_, i) {
-    return i;
-  }
   function pause_effects(state2, to_destroy, controlled_anchor) {
     var transitions = [];
     var length = to_destroy.length;
@@ -3513,13 +3546,13 @@
         current_batch
       );
       var defer = should_defer_append();
-      for (var index2 = 0; index2 < length; index2 += 1) {
-        var value = array[index2];
-        var key = get_key(value, index2);
+      for (var index = 0; index < length; index += 1) {
+        var value = array[index];
+        var key = get_key(value, index);
         var item = first_run ? null : items.get(key);
         if (item) {
           if (item.v) internal_set(item.v, value);
-          if (item.i) internal_set(item.i, index2);
+          if (item.i) internal_set(item.i, index);
           if (defer) {
             batch.unskip_effect(item.e);
           }
@@ -3529,7 +3562,7 @@
             first_run ? anchor : offscreen_anchor ??= create_text(),
             value,
             key,
-            index2,
+            index,
             render_fn,
             flags2,
             get_collection
@@ -3708,14 +3741,14 @@
       }
     }
   }
-  function create_item(items, anchor, value, key, index2, render_fn, flags2, get_collection) {
+  function create_item(items, anchor, value, key, index, render_fn, flags2, get_collection) {
     var v = (flags2 & EACH_ITEM_REACTIVE) !== 0 ? (flags2 & EACH_ITEM_IMMUTABLE) === 0 ? /* @__PURE__ */ mutable_source(value, false, false) : source(value) : null;
-    var i = (flags2 & EACH_INDEX_REACTIVE) !== 0 ? source(index2) : null;
+    var i = (flags2 & EACH_INDEX_REACTIVE) !== 0 ? source(index) : null;
     return {
       v,
       i,
       e: branch(() => {
-        render_fn(anchor, v ?? value, i ?? index2, get_collection);
+        render_fn(anchor, v ?? value, i ?? index, get_collection);
         return () => {
           items.delete(key);
         };
@@ -3844,6 +3877,53 @@
       dom[CLASS_CACHE] = value;
     }
     return next_classes;
+  }
+  const IS_CUSTOM_ELEMENT = /* @__PURE__ */ Symbol("is custom element");
+  const IS_HTML = /* @__PURE__ */ Symbol("is html");
+  function set_attribute(element, attribute, value, skip_warning) {
+    var attributes = get_attributes(element);
+    if (attributes[attribute] === (attributes[attribute] = value)) return;
+    if (attribute === "loading") {
+      element[LOADING_ATTR_SYMBOL] = value;
+    }
+    if (value == null) {
+      element.removeAttribute(attribute);
+    } else if (typeof value !== "string" && get_setters(element).includes(attribute)) {
+      element[attribute] = value;
+    } else {
+      element.setAttribute(attribute, value);
+    }
+  }
+  function get_attributes(element) {
+    return (
+      /** @type {Record<string | symbol, unknown>} **/
+      /** @type {any} */
+      element[ATTRIBUTES_CACHE] ??= {
+        [IS_CUSTOM_ELEMENT]: element.nodeName.includes("-"),
+        [IS_HTML]: element.namespaceURI === NAMESPACE_HTML
+      }
+    );
+  }
+  var setters_cache = /* @__PURE__ */ new Map();
+  function get_setters(element) {
+    var cache_key = element.getAttribute("is") || element.nodeName;
+    var setters = setters_cache.get(cache_key);
+    if (setters) return setters;
+    setters_cache.set(cache_key, setters = []);
+    var descriptors;
+    var proto = element;
+    var element_proto = Element.prototype;
+    while (element_proto !== proto) {
+      descriptors = get_descriptors(proto);
+      for (var key in descriptors) {
+        if (descriptors[key].set && // better safe than sorry, we don't want spread attributes to mess with HTML content
+        key !== "innerHTML" && key !== "textContent" && key !== "innerText") {
+          setters.push(key);
+        }
+      }
+      proto = get_prototype_of(proto);
+    }
+    return setters;
   }
   function bind_value(input, get2, set2 = get2) {
     var batches = /* @__PURE__ */ new WeakSet();
@@ -4085,12 +4165,14 @@
   }
   var root = /* @__PURE__ */ from_html(`<p> </p>`);
   var root_1 = /* @__PURE__ */ from_html(`<li class="italic py-2 text-[color-mix(in_oklch,var(--color-ink)_40%,transparent)]">No annotations yet.</li>`);
-  var root_2 = /* @__PURE__ */ from_html(`<div class="quote-text line-clamp-2 text-[0.75rem] italic text-[color-mix(in_oklch,var(--color-ink)_75%,transparent)] border-l-2 border-redline pl-1.5"> </div>`);
-  var root_3 = /* @__PURE__ */ from_html(`<li><div class="flex items-center gap-1"><span> </span> <span class="flex-1"></span> <button data-action="delete" aria-label="Delete annotation" class="shrink-0 bg-transparent border-none text-[color-mix(in_oklch,var(--color-ink)_35%,transparent)] cursor-pointer text-base leading-none px-[0.2rem] hover:text-redline"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"></path></svg></button></div> <!> <div class="annotation-comment line-clamp-2 text-ink text-[0.85rem]"> </div></li>`);
-  var root_4 = /* @__PURE__ */ from_html(`<div class="annotation-panel flex-1 flex flex-col gap-3 mt-0 [&amp;_h2]:font-mono [&amp;_h2]:text-[0.6875rem] [&amp;_h2]:font-semibold [&amp;_h2]:tracking-[0.08em] [&amp;_h2]:uppercase [&amp;_h2]:text-[color-mix(in_oklch,var(--color-ink)_55%,transparent)] [&amp;_h2]:mb-3"><h2>Annotations</h2> <ul class="annotation-list list-none p-0 m-0 flex-1 min-h-8"><!></ul> <div class="note-box flex flex-col gap-2 my-3 mb-4"><textarea rows="2" placeholder="Add a whole-document note…" class="flex-1 bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-ink)_4%)] border border-hairline rounded-proof text-ink text-[0.875rem] leading-[1.5] py-[0.4rem] px-2 resize-y focus:outline-none focus:border-[color-mix(in_oklch,var(--color-redline)_60%,transparent)]"></textarea> <div class="flex items-center gap-2"><button data-action="add-note" class="send-btn flex items-center gap-1.5 bg-redline text-[oklch(98%_0.01_70)] rounded-proof border border-[color-mix(in_oklch,var(--color-redline)_75%,black_10%)] font-mono text-[0.8rem] font-semibold tracking-[0.04em] uppercase cursor-pointer py-[0.3rem] px-[0.7rem] hover:bg-[color-mix(in_oklch,var(--color-redline)_92%,black_8%)] transition-colors duration-150 ease-linear group relative"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 20v-6l8-2l-8-2V4l19 8z"></path></svg> <span>Send</span></button> <button data-action="priority-note" class="priority-btn flex items-center gap-1.5 bg-transparent text-[oklch(52%_0.18_28)] rounded-proof border border-[color-mix(in_oklch,var(--color-redline)_60%,transparent)] font-mono text-[0.8rem] font-semibold tracking-[0.04em] uppercase cursor-pointer py-[0.3rem] px-[0.7rem] hover:bg-[color-mix(in_oklch,var(--color-redline)_10%,transparent)] transition-colors duration-150 ease-linear group relative"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 21q-.825 0-1.412-.587T10 19t.588-1.412T12 17t1.413.588T14 19t-.587 1.413T12 21m-2-6V3h4v12z"></path></svg> <span>Priority</span></button> <button data-action="toggle-mode" aria-label="Global comment" title="Global comment" class="mode-toggle flex items-center justify-center bg-transparent text-[color-mix(in_oklch,var(--color-ink)_70%,transparent)] rounded-proof border border-hairline cursor-default opacity-40 p-[0.4rem] hover:text-redline transition-colors duration-150 ease-linear group relative ml-auto" disabled=""><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12.013 2t3.875.788t3.175 2.15t2.15 3.175t.787 3.875t-.787 3.887t-2.15 3.188t-3.175 2.15t-3.875.787"></path></svg></button></div></div></div>`);
-  var root_5 = /* @__PURE__ */ from_html(`<div class="done-state mt-auto shrink-0 mt-6 p-4 px-5 bg-[color-mix(in_oklch,var(--color-paper)_90%,var(--color-redline)_6%)] border border-hairline rounded-proof text-ink font-mono text-[0.85rem]">Done — you can close this tab</div>`);
-  var root_6 = /* @__PURE__ */ from_html(`<div class="pi-annotate-endlabel shrink-0 font-mono text-[0.6875rem] tracking-[0.08em] uppercase text-[color-mix(in_oklch,var(--color-ink)_60%,transparent)] border-b border-hairline"><span> </span> <span class="float-right"><span class="pi-annotate-count text-redline tabular-nums"> </span></span></div> <div class="pi-annotate-layout flex-1 min-h-0 overflow-hidden grid grid-cols-[minmax(0,1fr)_22rem] gap-8 max-[860px]:grid-cols-1"><div class="doc-col relative overflow-y-auto pl-14 max-[860px]:pl-6"><h1> </h1> <div class="content pi-annotate-doc bg-transparent text-[1.0625rem] leading-[1.8] max-w-[68ch] [&amp;_h1]:font-bold [&amp;_h1]:tracking-[-0.02em] [&amp;_h1]:leading-[1.15] [&amp;_h1]:my-[1.6rem_0.7rem] [&amp;_h1]:text-[1.85rem] [&amp;_h2]:font-semibold [&amp;_h2]:tracking-[-0.01em] [&amp;_h2]:my-[1.8rem_0.65rem] [&amp;_h2]:text-[1.4rem] [&amp;_p]:my-[0.7rem] [&amp;_ul]:my-[0.8rem] [&amp;_ul]:pl-[1.4rem] [&amp;_li]:my-[0.35rem] [&amp;_blockquote]:my-[1.1rem] [&amp;_blockquote]:py-[0.4rem] [&amp;_blockquote]:pr-0 [&amp;_blockquote]:pl-[1.1rem] [&amp;_blockquote]:border-l-2 [&amp;_blockquote]:border-hairline [&amp;_blockquote]:text-[color-mix(in_oklch,var(--color-ink)_75%,transparent)] [&amp;_blockquote]:italic [&amp;_pre]:my-[1.1rem] [&amp;_pre]:py-[0.9rem] [&amp;_pre]:px-[1.1rem] [&amp;_pre]:bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-ink)_8%)] [&amp;_pre]:border [&amp;_pre]:border-hairline [&amp;_pre]:rounded-proof [&amp;_pre]:overflow-x-auto [&amp;_code]:font-mono [&amp;_code]:bg-[color-mix(in_oklch,var(--color-paper)_88%,var(--color-ink)_12%)] [&amp;_code]:rounded-proof [&amp;_pre_code]:bg-transparent [&amp;_a]:text-redline [&amp;_a]:underline [&amp;_a]:decoration-[color-mix(in_oklch,var(--color-redline)_40%,transparent)] [&amp;_a]:underline-offset-2"></div> <button data-action="submit" aria-label="Send to agent" class="btn btn-circle fixed bottom-4 right-[24rem] z-50 max-[860px]:right-4 bg-redline text-[oklch(98%_0.01_70)] border-2 border-[color-mix(in_oklch,var(--color-redline)_75%,black_10%)] shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--color-redline)_30%,transparent)] hover:bg-[color-mix(in_oklch,var(--color-redline)_92%,black_8%)] transition-colors duration-150 ease-linear group"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 20v-6l8-2l-8-2V4l19 8z"></path></svg> <span class="tooltip-label pointer-events-none absolute -top-9 right-0 whitespace-nowrap bg-ink text-paper text-[0.65rem] font-mono px-2 py-0.5 rounded-proof opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10">Send to agent</span></button></div> <div class="pi-annotate-margin h-full overflow-y-auto flex flex-col border-l border-hairline pl-6 pb-6"><!></div></div>`, 1);
-  var root_7 = /* @__PURE__ */ from_html(`<div id="app" class="pi-annotate-app h-screen overflow-hidden flex flex-col text-ink leading-[1.7] bg-paper !bg-[radial-gradient(120%_80%_at_0%_0%,var(--color-paper-warm)_0%,transparent_50%),radial-gradient(120%_80%_at_100%_100%,var(--color-paper-cool)_0%,transparent_50%)] [&amp;_h1]:text-ink [&amp;_h2]:text-ink [&amp;_h3]:text-ink [&amp;_h4]:text-ink [&amp;_h5]:text-ink [&amp;_h6]:text-ink [&amp;_p]:text-ink [&amp;_li]:text-ink [&amp;_blockquote]:text-ink"><!></div>`);
+  var root_2 = /* @__PURE__ */ from_html(`<div> </div>`);
+  var root_3 = /* @__PURE__ */ from_html(`<li><div class="flex items-center gap-1"><span> </span> <span class="flex-1"></span> <button data-action="delete" aria-label="Delete annotation" class="shrink-0 bg-transparent border-none text-[color-mix(in_oklch,var(--color-ink)_35%,transparent)] cursor-pointer text-base leading-none px-[0.2rem] hover:text-redline"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"></path></svg></button></div> <!> <div> </div></li>`);
+  var root_4 = /* @__PURE__ */ from_svg(`<svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 14v-2h7v2zm0-4V8h11v2zm0-4V4h11v2zm9 14v-3.075l5.525-5.5q.225-.225.5-.325t.55-.1q.3 0 .575.113t.5.337l.925.925q.2.225.313.5t.112.55t-.1.563t-.325.512l-5.5 5.5zm6.575-5.6l.925-.975l-.925-.925l-.95.95z"></path></svg>`);
+  var root_5 = /* @__PURE__ */ from_svg(`<svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.125 21.213q-1.825-.788-3.187-2.15t-2.15-3.188T2 11.988t.788-3.875t2.15-3.175t3.187-2.15T12.013 2t3.875.788t3.175 2.15t2.15 3.175t.787 3.875t-.787 3.887t-2.15 3.188t-3.175 2.15t-3.875.787"></path></svg>`);
+  var root_6 = /* @__PURE__ */ from_html(`<div class="annotation-panel flex-1 flex flex-col gap-3 mt-0 [&amp;_h2]:font-mono [&amp;_h2]:text-[0.6875rem] [&amp;_h2]:font-semibold [&amp;_h2]:tracking-[0.08em] [&amp;_h2]:uppercase [&amp;_h2]:text-[color-mix(in_oklch,var(--color-ink)_55%,transparent)] [&amp;_h2]:mb-3"><h2>Annotations</h2> <ul class="annotation-list list-none p-0 m-0 flex-1 min-h-8"><!></ul> <div class="note-box flex flex-col gap-2 my-3 mb-4"><textarea rows="2" class="flex-1 bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-ink)_4%)] border border-hairline rounded-proof text-ink text-[0.875rem] leading-[1.5] py-[0.4rem] px-2 resize-y focus:outline-none focus:border-[color-mix(in_oklch,var(--color-redline)_60%,transparent)]"></textarea> <div class="flex items-center gap-2"><button data-action="add-note" class="send-btn flex items-center gap-1.5 bg-redline text-[oklch(98%_0.01_70)] rounded-proof border border-[color-mix(in_oklch,var(--color-redline)_75%,black_10%)] font-mono text-[0.8rem] font-semibold tracking-[0.04em] uppercase cursor-pointer py-[0.3rem] px-[0.7rem] hover:bg-[color-mix(in_oklch,var(--color-redline)_92%,black_8%)] transition-colors duration-150 ease-linear group relative"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 20v-6l8-2l-8-2V4l19 8z"></path></svg> <span>Send</span></button> <button data-action="priority-note" class="priority-btn flex items-center gap-1.5 bg-transparent text-[oklch(52%_0.18_28)] rounded-proof border border-[color-mix(in_oklch,var(--color-redline)_60%,transparent)] font-mono text-[0.8rem] font-semibold tracking-[0.04em] uppercase cursor-pointer py-[0.3rem] px-[0.7rem] hover:bg-[color-mix(in_oklch,var(--color-redline)_10%,transparent)] transition-colors duration-150 ease-linear group relative"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 21q-.825 0-1.412-.587T10 19t.588-1.412T12 17t1.413.588T14 19t-.587 1.413T12 21m-2-6V3h4v12z"></path></svg> <span>Priority</span></button> <button data-action="toggle-mode"><!></button></div></div></div>`);
+  var root_7 = /* @__PURE__ */ from_html(`<div class="done-state mt-auto shrink-0 mt-6 p-4 px-5 bg-[color-mix(in_oklch,var(--color-paper)_90%,var(--color-redline)_6%)] border border-hairline rounded-proof text-ink font-mono text-[0.85rem]">Done — you can close this tab</div>`);
+  var root_8 = /* @__PURE__ */ from_html(`<div class="pi-annotate-endlabel shrink-0 font-mono text-[0.6875rem] tracking-[0.08em] uppercase text-[color-mix(in_oklch,var(--color-ink)_60%,transparent)] border-b border-hairline"><span> </span> <span class="float-right"><span class="pi-annotate-count text-redline tabular-nums"> </span></span></div> <div class="pi-annotate-layout flex-1 min-h-0 overflow-hidden grid grid-cols-[minmax(0,1fr)_22rem] gap-8 max-[860px]:grid-cols-1"><div class="doc-col relative overflow-y-auto pl-14 max-[860px]:pl-6"><h1> </h1> <div class="content pi-annotate-doc bg-transparent text-[1.0625rem] leading-[1.8] max-w-[68ch] [&amp;_h1]:font-bold [&amp;_h1]:tracking-[-0.02em] [&amp;_h1]:leading-[1.15] [&amp;_h1]:my-[1.6rem_0.7rem] [&amp;_h1]:text-[1.85rem] [&amp;_h2]:font-semibold [&amp;_h2]:tracking-[-0.01em] [&amp;_h2]:my-[1.8rem_0.65rem] [&amp;_h2]:text-[1.4rem] [&amp;_p]:my-[0.7rem] [&amp;_ul]:my-[0.8rem] [&amp;_ul]:pl-[1.4rem] [&amp;_li]:my-[0.35rem] [&amp;_blockquote]:my-[1.1rem] [&amp;_blockquote]:py-[0.4rem] [&amp;_blockquote]:pr-0 [&amp;_blockquote]:pl-[1.1rem] [&amp;_blockquote]:border-l-2 [&amp;_blockquote]:border-hairline [&amp;_blockquote]:text-[color-mix(in_oklch,var(--color-ink)_75%,transparent)] [&amp;_blockquote]:italic [&amp;_pre]:my-[1.1rem] [&amp;_pre]:py-[0.9rem] [&amp;_pre]:px-[1.1rem] [&amp;_pre]:bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-ink)_8%)] [&amp;_pre]:border [&amp;_pre]:border-hairline [&amp;_pre]:rounded-proof [&amp;_pre]:overflow-x-auto [&amp;_code]:font-mono [&amp;_code]:bg-[color-mix(in_oklch,var(--color-paper)_88%,var(--color-ink)_12%)] [&amp;_code]:rounded-proof [&amp;_pre_code]:bg-transparent [&amp;_a]:text-redline [&amp;_a]:underline [&amp;_a]:decoration-[color-mix(in_oklch,var(--color-redline)_40%,transparent)] [&amp;_a]:underline-offset-2"></div> <button data-action="submit" aria-label="Send to agent" class="btn btn-circle fixed bottom-4 right-[24rem] z-50 max-[860px]:right-4 bg-redline text-[oklch(98%_0.01_70)] border-2 border-[color-mix(in_oklch,var(--color-redline)_75%,black_10%)] shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--color-redline)_30%,transparent)] hover:bg-[color-mix(in_oklch,var(--color-redline)_92%,black_8%)] transition-colors duration-150 ease-linear group"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 20v-6l8-2l-8-2V4l19 8z"></path></svg> <span class="tooltip-label pointer-events-none absolute -top-9 right-0 whitespace-nowrap bg-ink text-paper text-[0.65rem] font-mono px-2 py-0.5 rounded-proof opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10">Send to agent</span></button></div> <div class="pi-annotate-margin h-full overflow-y-auto flex flex-col border-l border-hairline pl-6 pb-6"><!></div></div>`, 1);
+  var root_9 = /* @__PURE__ */ from_html(`<div id="app" class="pi-annotate-app h-screen overflow-hidden flex flex-col text-ink leading-[1.7] bg-paper !bg-[radial-gradient(120%_80%_at_0%_0%,var(--color-paper-warm)_0%,transparent_50%),radial-gradient(120%_80%_at_100%_100%,var(--color-paper-cool)_0%,transparent_50%)] [&amp;_h1]:text-ink [&amp;_h2]:text-ink [&amp;_h3]:text-ink [&amp;_h4]:text-ink [&amp;_h5]:text-ink [&amp;_h6]:text-ink [&amp;_p]:text-ink [&amp;_li]:text-ink [&amp;_blockquote]:text-ink"><!></div>`);
   function Annotate($$anchor, $$props) {
     push($$props, true);
     let currentFile = /* @__PURE__ */ state("");
@@ -4098,7 +4180,173 @@
     let submitted = /* @__PURE__ */ state(false);
     let error = /* @__PURE__ */ state(null);
     let commentText = /* @__PURE__ */ state("");
+    let currentQuote = /* @__PURE__ */ state("");
+    let pendingBlockIndex = /* @__PURE__ */ state(null);
     let contentEl = /* @__PURE__ */ state(void 0);
+    let highlights = [];
+    let highlightQuote = null;
+    function getSelectedText() {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return "";
+      const range = sel.getRangeAt(0);
+      if (!get(contentEl) || !get(contentEl).contains(range.commonAncestorContainer)) return "";
+      const text = sel.toString();
+      return /^\s*$/.test(text) ? "" : text;
+    }
+    function wrapHighlight(q) {
+      if (!get(contentEl) || !q) return;
+      if (highlightQuote === q && highlights.length > 0) return;
+      removeHighlight();
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      if (!get(contentEl).contains(range.commonAncestorContainer) || range.collapsed) {
+        wrapByString(q);
+        return;
+      }
+      const walker = document.createTreeWalker(get(contentEl), NodeFilter.SHOW_TEXT);
+      const matches = [];
+      let node;
+      while (node = walker.nextNode()) {
+        const tn = node;
+        if (sel.containsNode && !sel.containsNode(tn, true)) continue;
+        let start = 0;
+        let end = tn.nodeValue.length;
+        if (tn === range.startContainer) start = range.startOffset;
+        if (tn === range.endContainer) end = range.endOffset;
+        if (start >= end) continue;
+        if (/^\s*$/.test(tn.nodeValue.slice(start, end))) continue;
+        matches.push({ node: tn, start, end });
+      }
+      const spans = [];
+      for (const m of matches) {
+        const span = document.createElement("span");
+        span.className = "pi-annotate-redline";
+        let middle = m.node;
+        if (m.start > 0) middle = m.node.splitText(m.start);
+        let after = middle;
+        if (m.end - m.start < middle.nodeValue.length) after = middle.splitText(m.end - m.start);
+        middle.nodeValue = middle.nodeValue.slice(0, m.end - m.start);
+        m.node.parentNode.insertBefore(span, after);
+        span.appendChild(middle);
+        spans.push(span);
+      }
+      highlights = spans;
+      highlightQuote = q;
+    }
+    function wrapByString(q) {
+      if (!get(contentEl)) return;
+      const walker = document.createTreeWalker(get(contentEl), NodeFilter.SHOW_TEXT);
+      let node;
+      while (node = walker.nextNode()) {
+        const tn = node;
+        const idx = tn.nodeValue.indexOf(q);
+        if (idx !== -1) {
+          const span = document.createElement("span");
+          span.className = "pi-annotate-redline";
+          const after = tn.splitText(idx);
+          after.nodeValue = after.nodeValue.slice(q.length);
+          span.appendChild(document.createTextNode(q));
+          tn.parentNode.insertBefore(span, after);
+          highlights = [span];
+          highlightQuote = q;
+          return;
+        }
+      }
+    }
+    function removeHighlight() {
+      for (const span of highlights) {
+        if (span.parentNode) {
+          const text = document.createTextNode(span.textContent || "");
+          span.parentNode.replaceChild(text, span);
+          text.parentNode?.normalize();
+        }
+      }
+      highlights = [];
+      highlightQuote = null;
+    }
+    function onSelectionChange() {
+      const q = getSelectedText();
+      if (q) set(
+        currentQuote,
+        q,
+        // hold it; do NOT clear when the textarea steals focus
+        true
+      );
+    }
+    function onDocMouseUp() {
+      const q = getSelectedText() || get(currentQuote);
+      if (q) {
+        set(currentQuote, q, true);
+        wrapHighlight(q);
+      }
+    }
+    function submitComposer(priority) {
+      const comment2 = get(commentText).trim();
+      if (!comment2) return;
+      if (get(currentQuote)) {
+        set(
+          annotations,
+          [
+            ...get(annotations),
+            {
+              kind: "range",
+              quote: get(currentQuote),
+              comment: comment2,
+              created: Date.now(),
+              priority
+            }
+          ],
+          true
+        );
+      } else if (get(pendingBlockIndex) != null) {
+        set(
+          annotations,
+          [
+            ...get(annotations),
+            {
+              kind: "block",
+              blockIndex: get(pendingBlockIndex),
+              comment: comment2,
+              created: Date.now(),
+              priority
+            }
+          ],
+          true
+        );
+      } else {
+        set(
+          annotations,
+          [
+            ...get(annotations),
+            { kind: "note", comment: comment2, created: Date.now() }
+          ],
+          true
+        );
+      }
+      set(commentText, "");
+      set(pendingBlockIndex, null);
+      if (get(currentQuote)) {
+        set(currentQuote, "");
+      }
+    }
+    function clearSelection() {
+      set(currentQuote, "");
+      set(pendingBlockIndex, null);
+      window.getSelection()?.removeAllRanges();
+      removeHighlight();
+    }
+    let lineMode = /* @__PURE__ */ user_derived(() => get(currentQuote) !== "");
+    user_effect(() => {
+      if (!get(contentEl)) return;
+      for (const child2 of Array.from(get(contentEl).children)) {
+        child2.classList.add("annotatable-block", "relative", "pl-10");
+      }
+    });
+    user_effect(() => {
+      document.addEventListener("selectionchange", onSelectionChange);
+      return () => document.removeEventListener("selectionchange", onSelectionChange);
+    });
     let renderedHtml = /* @__PURE__ */ state("");
     async function loadDoc() {
       try {
@@ -4191,13 +4439,24 @@
           addNote,
           addBlock,
           addRange,
-          // wrapRangeHighlight added in Gate 2 (needs the redline logic + contentEl).
+          wrapRangeHighlight: (quote) => wrapHighlight(quote),
           deleteAnnotation,
           submit,
           buildPayload
         };
       }
     });
+    let expandedRows = /* @__PURE__ */ state(proxy({}));
+    function toggleExpand(created) {
+      set(
+        expandedRows,
+        {
+          ...get(expandedRows),
+          [created]: !get(expandedRows)[created]
+        },
+        true
+      );
+    }
     loadDoc();
     function annotationCount() {
       return get(annotations).length + " annotation" + (get(annotations).length === 1 ? "" : "s");
@@ -4207,38 +4466,38 @@
       if (a.kind === "block") return "block #" + a.blockIndex;
       return "note";
     }
-    var div = root_7();
-    var node = child(div);
+    var div = root_9();
+    var node_1 = child(div);
     {
       var consequent = ($$anchor2) => {
         var p = root();
-        var text = child(p);
-        template_effect(() => set_text(text, get(error)));
+        var text_1 = child(p);
+        template_effect(() => set_text(text_1, get(error)));
         append($$anchor2, p);
       };
-      var alternate_2 = ($$anchor2) => {
-        var fragment = root_6();
+      var alternate_3 = ($$anchor2) => {
+        var fragment = root_8();
         var div_1 = first_child(fragment);
-        var span = child(div_1);
-        var text_1 = child(span);
-        var span_1 = sibling(span, 2);
-        var span_2 = child(span_1);
-        var text_2 = child(span_2);
+        var span_1 = child(div_1);
+        var text_2 = child(span_1);
+        var span_2 = sibling(span_1, 2);
+        var span_3 = child(span_2);
+        var text_3 = child(span_3);
         var div_2 = sibling(div_1, 2);
         var div_3 = child(div_2);
         var h1 = child(div_3);
-        var text_3 = child(h1);
+        var text_4 = child(h1);
         var div_4 = sibling(h1, 2);
         html(div_4, () => get(renderedHtml), true);
         bind_this(div_4, ($$value) => set(contentEl, $$value), () => get(contentEl));
         var button = sibling(div_4, 2);
         var div_5 = sibling(div_3, 2);
-        var node_1 = child(div_5);
+        var node_2 = child(div_5);
         {
-          var consequent_3 = ($$anchor3) => {
-            var div_6 = root_4();
+          var consequent_4 = ($$anchor3) => {
+            var div_6 = root_6();
             var ul = sibling(child(div_6), 2);
-            var node_2 = child(ul);
+            var node_3 = child(ul);
             {
               var consequent_1 = ($$anchor4) => {
                 var li = root_1();
@@ -4246,38 +4505,44 @@
               };
               var alternate = ($$anchor4) => {
                 var fragment_1 = comment();
-                var node_3 = first_child(fragment_1);
-                each(node_3, 17, () => get(annotations), index, ($$anchor5, a) => {
+                var node_4 = first_child(fragment_1);
+                each(node_4, 19, () => get(annotations), (a) => a.created, ($$anchor5, a) => {
                   const isPriority = /* @__PURE__ */ user_derived(() => get(a).kind !== "note" && get(a).priority === true);
                   const isRange = /* @__PURE__ */ user_derived(() => get(a).kind === "range");
+                  const expanded = /* @__PURE__ */ user_derived(() => get(expandedRows)[get(a).created] === true);
                   var li_1 = root_3();
                   var div_7 = child(li_1);
-                  var span_3 = child(div_7);
-                  var text_4 = child(span_3);
-                  var button_1 = sibling(span_3, 4);
-                  var node_4 = sibling(div_7, 2);
+                  var span_4 = child(div_7);
+                  var text_5 = child(span_4);
+                  var button_1 = sibling(span_4, 4);
+                  var node_5 = sibling(div_7, 2);
                   {
                     var consequent_2 = ($$anchor6) => {
                       var div_8 = root_2();
-                      var text_5 = child(div_8);
-                      template_effect(() => set_text(text_5, get(a).quote));
+                      var text_6 = child(div_8);
+                      template_effect(() => {
+                        set_class(div_8, 1, `quote-text ${get(expanded) ? "line-clamp-none" : "line-clamp-2"} text-[0.75rem] italic text-[color-mix(in_oklch,var(--color-ink)_75%,transparent)] border-l-2 border-redline pl-1.5`);
+                        set_text(text_6, get(a).quote);
+                      });
                       append($$anchor6, div_8);
                     };
-                    if_block(node_4, ($$render) => {
+                    if_block(node_5, ($$render) => {
                       if (get(isRange)) $$render(consequent_2);
                     });
                   }
-                  var div_9 = sibling(node_4, 2);
-                  var text_6 = child(div_9);
+                  var div_9 = sibling(node_5, 2);
+                  var text_7 = child(div_9);
                   template_effect(
                     ($0) => {
-                      set_class(li_1, 1, `annotation-item flex flex-col gap-1 py-2 px-[0.6rem] border rounded-proof mb-2 bg-paper cursor-pointer select-none ${get(isPriority) ? "border-redline bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-redline)_8%)]" : "border-hairline"}`);
-                      set_class(span_3, 1, `annotation-meta font-mono text-[0.625rem] tracking-[0.06em] uppercase shrink-0 pt-[0.15rem] ${get(isPriority) ? "text-redline" : "text-[color-mix(in_oklch,var(--color-ink)_50%,transparent)]"}`);
-                      set_text(text_4, `${$0 ?? ""}${get(isPriority) ? " !" : ""}`);
-                      set_text(text_6, get(a).comment);
+                      set_class(li_1, 1, `annotation-item flex flex-col gap-1 py-2 px-[0.6rem] border rounded-proof mb-2 bg-paper cursor-pointer select-none ${get(isPriority) ? "border-redline bg-[color-mix(in_oklch,var(--color-paper)_92%,var(--color-redline)_8%)]" : "border-hairline"} ${get(expanded) ? "is-expanded" : ""}`);
+                      set_class(span_4, 1, `annotation-meta font-mono text-[0.625rem] tracking-[0.06em] uppercase shrink-0 pt-[0.15rem] ${get(isPriority) ? "text-redline" : "text-[color-mix(in_oklch,var(--color-ink)_50%,transparent)]"}`);
+                      set_text(text_5, `${$0 ?? ""}${get(isPriority) ? " !" : ""}`);
+                      set_class(div_9, 1, `annotation-comment ${get(expanded) ? "line-clamp-none" : "line-clamp-2"} text-ink text-[0.85rem]`);
+                      set_text(text_7, get(a).comment);
                     },
                     [() => formatAnnotation(get(a))]
                   );
+                  delegated("click", li_1, () => toggleExpand(get(a).created));
                   delegated("click", button_1, (e) => {
                     e.stopPropagation();
                     deleteAnnotation(get(a).created);
@@ -4286,45 +4551,75 @@
                 });
                 append($$anchor4, fragment_1);
               };
-              if_block(node_2, ($$render) => {
+              if_block(node_3, ($$render) => {
                 if (get(annotations).length === 0) $$render(consequent_1);
                 else $$render(alternate, -1);
               });
             }
             var div_10 = sibling(ul, 2);
             var textarea = child(div_10);
+            var div_11 = sibling(textarea, 2);
+            var button_2 = child(div_11);
+            var button_3 = sibling(button_2, 2);
+            var button_4 = sibling(button_3, 2);
+            var node_6 = child(button_4);
+            {
+              var consequent_3 = ($$anchor4) => {
+                var svg = root_4();
+                append($$anchor4, svg);
+              };
+              var alternate_1 = ($$anchor4) => {
+                var svg_1 = root_5();
+                append($$anchor4, svg_1);
+              };
+              if_block(node_6, ($$render) => {
+                if (get(lineMode)) $$render(consequent_3);
+                else $$render(alternate_1, -1);
+              });
+            }
+            template_effect(() => {
+              set_attribute(textarea, "placeholder", get(lineMode) ? "Line comment…" : "Add a whole-document note…");
+              set_attribute(button_4, "aria-label", get(lineMode) ? "Line comment — click to clear selection" : "Global comment");
+              set_attribute(button_4, "title", get(lineMode) ? "Line comment — click to clear selection" : "Global comment");
+              set_class(button_4, 1, `mode-toggle flex items-center justify-center bg-transparent text-[color-mix(in_oklch,var(--color-ink)_70%,transparent)] rounded-proof border border-hairline ${get(lineMode) ? "cursor-pointer" : "cursor-default opacity-40"} p-[0.4rem] hover:text-redline transition-colors duration-150 ease-linear group relative ml-auto`);
+              button_4.disabled = !get(lineMode);
+            });
             bind_value(textarea, () => get(commentText), ($$value) => set(commentText, $$value));
+            delegated("click", button_2, () => submitComposer(false));
+            delegated("click", button_3, () => submitComposer(true));
+            delegated("click", button_4, clearSelection);
             append($$anchor3, div_6);
           };
-          var alternate_1 = ($$anchor3) => {
-            var div_11 = root_5();
-            append($$anchor3, div_11);
+          var alternate_2 = ($$anchor3) => {
+            var div_12 = root_7();
+            append($$anchor3, div_12);
           };
-          if_block(node_1, ($$render) => {
-            if (!get(submitted)) $$render(consequent_3);
-            else $$render(alternate_1, -1);
+          if_block(node_2, ($$render) => {
+            if (!get(submitted)) $$render(consequent_4);
+            else $$render(alternate_2, -1);
           });
         }
         template_effect(
           ($0) => {
-            set_text(text_1, get(currentFile));
-            set_text(text_2, $0);
-            set_text(text_3, get(currentFile));
+            set_text(text_2, get(currentFile));
+            set_text(text_3, $0);
+            set_text(text_4, get(currentFile));
           },
           [() => annotationCount()]
         );
+        delegated("mouseup", div_4, onDocMouseUp);
         delegated("click", button, submit);
         append($$anchor2, fragment);
       };
-      if_block(node, ($$render) => {
+      if_block(node_1, ($$render) => {
         if (get(error)) $$render(consequent);
-        else $$render(alternate_2, -1);
+        else $$render(alternate_3, -1);
       });
     }
     append($$anchor, div);
     pop();
   }
-  delegate(["click"]);
+  delegate(["mouseup", "click"]);
   const target = document.getElementById("app");
   if (target) {
     mount(Annotate, { target });
