@@ -84,15 +84,15 @@ const fetchShim = `<script>
 
 const html = htmlShell();
 
-// Insert the shim just before the main <script> (which calls clientScript).
-// The main script tag is `<script>${clientScript()}</script>` — we inject
-// before the first `<script>` that contains the IIFE.
-const marker = "<script>(function";
-const idx = html.indexOf(marker);
-if (idx === -1) {
-  throw new Error("Could not find main <script> insertion point in htmlShell()");
+// Insert the shim just before the editor <script> (the single <script> tag
+// htmlShell() emits, holding the compiled Annotate bundle). Injecting the
+// shim before it ensures window.fetch is patched before the bundle runs
+// loadDoc().
+const scriptIdx = html.indexOf("<script>");
+if (scriptIdx === -1) {
+  throw new Error("Could not find <script> insertion point in htmlShell()");
 }
-const previewHtml = html.slice(0, idx) + fetchShim + "\n" + html.slice(idx);
+const previewHtml = html.slice(0, scriptIdx) + fetchShim + "\n" + html.slice(scriptIdx);
 
 await mkdir(path.join(here, "dist"), { recursive: true });
 await writeFile(path.join(here, "dist", "preview.html"), previewHtml, "utf8");

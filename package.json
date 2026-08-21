@@ -3,13 +3,17 @@
   "version": "0.2.2",
   "private": true,
   "type": "module",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
-    "extensions": ["./.pi/extensions/pi-annotate/index.ts"]
+    "extensions": [
+      "./.pi/extensions/pi-annotate/index.ts"
+    ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
@@ -17,21 +21,27 @@
     "test": "vitest run",
     "check": "tsc --noEmit",
     "build:css": "tailwindcss -i .pi/extensions/pi-annotate/styles.css -o .pi/extensions/pi-annotate/dist/annotate.css --minify",
+    "build:svelte": "vite build",
     "build:preview": "node .pi/extensions/pi-annotate/preview.mjs",
-    "build": "npm run build:css && npm run build:preview",
+    "build": "npm run build:css && npm run build:svelte && npm run build:preview",
+    "live": "node scripts/live-dev.mjs",
     "test:e2e": "playwright test --config playwright.config.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.80.10",
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@earendil-works/pi-tui": "0.80.10",
+    "@playwright/test": "1.61.1",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@tailwindcss/cli": "^4.3.3",
     "@types/node": "26.2.0",
     "daisyui": "^5.7.19",
+    "happy-dom": "^18.0.1",
+    "svelte": "^5.56.10",
     "tailwindcss": "^4.3.3",
     "typebox": "1.1.38",
     "typescript": "7.0.2",
-    "vitest": "4.1.10",
-    "@playwright/test": "1.61.1"
+    "vite": "^7.3.6",
+    "vitest": "4.1.10"
   }
 }
